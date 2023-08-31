@@ -188,7 +188,7 @@ struct Server::Private {
 
 private:
 	void move_docid(Store::Id docid, Option<std::string> flagstr,
-			bool new_name, bool no_view);
+			bool new_name, bool no_view, const std::string& maildir);
 
 	void perform_move(Store::Id		docid,
 			  const Message&	msg,
@@ -423,8 +423,11 @@ Server::Private::make_command_map()
 	cmap.emplace(
 	    "remove",
 	    CommandInfo{
-		ArgMap{{":docid",
-			ArgInfo{Type::Number, true, "document-id for the message to remove"}}},
+	      ArgMap{
+		{":docid",
+		 ArgInfo{Type::Number, false, "document-id for the message to remove"}},
+		{":msgid",
+		 ArgInfo{Type::String, false, "message-id for the message(s) to remove"}}},
 		"remove a message from filesystem and database",
 		[&](const auto& params) { remove_handler(params); }});
 
@@ -964,7 +967,8 @@ void
 Server::Private::move_docid(Store::Id		docid,
 			    Option<std::string>	flagopt,
 			    bool		new_name,
-			    bool		no_view)
+			    bool		no_view,
+	                    const std::string&  maildir)
 {
 	if (docid == Store::InvalidId)
 		throw Error{Error::Code::InvalidArgument, "invalid docid"};
@@ -974,7 +978,7 @@ Server::Private::move_docid(Store::Id		docid,
 		throw Error{Error::Code::Store, "failed to get message from store"};
 
 	const auto flags = calculate_message_flags(msg.value(), flagopt);
-	perform_move(docid, *msg, "", flags, new_name, no_view);
+	perform_move(docid, *msg, maildir, flags, new_name, no_view);
 }
 
 /*
@@ -993,12 +997,12 @@ Server::Private::move_handler(const Command& cmd)
 	const auto docids{determine_docids(store_, cmd)};
 
 	if (docids.size() > 1) {
-		if (!maildir.empty()) // ie. duplicate message-ids.
-			throw Mu::Error{Error::Code::Store,
-				"cannot move multiple messages at the same time"};
+		// if (!maildir.empty()) // ie. duplicate message-ids.
+		// 	throw Mu::Error{Error::Code::Store,
+		// 		"cannot move multiple messages at the same time"};
 		// multi.
 		for (auto&& docid : docids)
-			move_docid(docid, flagopt, rename, no_view);
+			move_docid(docid, flagopt, rename, no_view, maildir);
 		return;
 	}
 	const auto docid{docids.at(0)};
@@ -1067,16 +1071,21 @@ Server::Private::quit_handler(const Command& cmd)
 void
 Server::Private::remove_handler(const Command& cmd)
 {
-	const auto docid{cmd.number_arg(":docid").value_or(0)};
-	const auto path{path_from_docid(store(), docid)};
+	// support message id
+	const auto docids{determine_docids(store(), cmd)};
+	// const auto docid{cmd.number_arg(":docid").value_or(0)};
 
-	if (::unlink(path.c_str()) != 0 && errno != ENOENT)
-		throw Error(Error::Code::File,
-			    "could not delete {}: {}", path, g_strerror(errno));
+	for (const auto docid : docids) {
+		const auto path{path_from_docid(store(), docid)};
 
-	if (!store().remove_message(path))
-		mu_warning("failed to remove message @ {} ({}) from store", path, docid);
-	output_sexp(Sexp().put_props(":remove", docid));	// act as if it worked.
+		if (::unlink(path.c_str()) != 0 && errno != ENOENT)
+			throw Error(Error::Code::File,
+				    "could not delete {}: {}", path, g_strerror(errno));
+
+		if (!store().remove_message(path))
+			mu_warning("failed to remove message @ {} ({}) from store", path, docid);
+		output_sexp(Sexp().put_props(":remove", docid));	// act as if it worked.
+	}
 }
 
 void
