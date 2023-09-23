@@ -32,7 +32,8 @@
 #include "mu-maildir.hh"
 #include "mu-query-match-deciders.hh"
 #include "mu-query.hh"
-#include "mu-bookmarks.hh"
+#include "mu-query-macros.hh"
+#include "mu-query-parser.hh"
 #include "message/mu-message.hh"
 
 #include "utils/mu-option.hh"
@@ -61,12 +62,30 @@ using OutputFunc = std::function<Result<void>(const Option<Message>& msg, const 
 using Format = Options::Find::Format;
 
 static Result<void>
-print_internal(const Store&       store,
-	       const std::string& expr,
-	       bool           xapian,
-	       bool           warn)
+analyze_query_expr(const Store& store, const std::string& expr, const Options& opts)
 {
-	mu_println("{}", store.parse_query(expr, xapian));
+	auto print_item=[&](auto&&title, auto&&val) {
+		const auto blue{opts.nocolor  ? "" : MU_COLOR_BLUE};
+		const auto green{opts.nocolor ? "" : MU_COLOR_GREEN};
+		const auto reset{opts.nocolor ? "" : MU_COLOR_DEFAULT};
+		mu_println("* {}{}{}:\n  {}{}{}", blue, title, reset, green, val, reset);
+	};
+
+	print_item("query", expr);
+
+	const auto pq{parse_query(expr, false/*don't expand*/).to_string()};
+	const auto pqx{parse_query(expr, true/*do expand*/).to_string()};
+
+	print_item("parsed query", pq);
+	if (pq != pqx)
+		print_item("parsed query (expanded)", pqx);
+
+	auto xq{make_xapian_query(store, expr)};
+	if (!xq)
+		return Err(std::move(xq.error()));
+
+	print_item("Xapian query", xq->get_description());
+
 	return Ok();
 }
 
@@ -110,28 +129,20 @@ exec_cmd(const Option<Message>& msg, const OutputInfo& info, const Options& opts
 }
 
 static Result<std::string>
-resolve_bookmark(const Options& opts)
+resolve_bookmark(const Store& store, const Options& opts)
 {
-	const auto bmfile = opts.runtime_path(RuntimePath::Bookmarks);
-	auto bm     = mu_bookmarks_new(bmfile.c_str());
-	if (!bm)
-		return Err(Error::Code::File,
-			   "failed to open bookmarks file '{}'", bmfile);
-
-	const auto bookmark{opts.find.bookmark};
-	const auto val = mu_bookmarks_lookup(bm, bookmark.c_str());
-	if (!val) {
-		mu_bookmarks_destroy(bm);
-		return Err(Error::Code::NoMatches,
-			   "bookmark '{}' not found", bookmark);
-	}
-
-	mu_bookmarks_destroy(bm);
-	return Ok(std::string(val));
+	QueryMacros macros{store.config()};
+	if (auto&& res{macros.load_bookmarks(opts.runtime_path(RuntimePath::Bookmarks))}; !res)
+		return Err(res.error());
+	else if (auto&& bm{macros.find_macro(opts.find.bookmark)}; !bm)
+		return Err(Error::Code::InvalidArgument, "bookmark '{}' not found",
+			   opts.find.bookmark);
+	else
+		return Ok(std::move(*bm));
 }
 
 static Result<std::string>
-get_query(const Options& opts)
+get_query(const Store& store, const Options& opts)
 {
 	if (opts.find.bookmark.empty() && opts.find.query.empty())
 		return Err(Error::Code::InvalidArgument,
@@ -139,7 +150,7 @@ get_query(const Options& opts)
 
 	std::string bookmark;
 	if (!opts.find.bookmark.empty()) {
-		const auto res = resolve_bookmark(opts);
+		const auto res = resolve_bookmark(store, opts);
 		if (!res)
 			return Err(std::move(res.error()));
 		bookmark = res.value() + " ";
@@ -473,7 +484,7 @@ output_query_results(const QueryResults& qres, const Options& opts)
 }
 
 static Result<void>
-process_query(const Store& store, const std::string& expr, const Options& opts)
+process_store_query(const Store& store, const std::string& expr, const Options& opts)
 {
 	auto qres{run_query(store, expr, opts)};
 	if (!qres)
@@ -488,19 +499,15 @@ process_query(const Store& store, const std::string& expr, const Options& opts)
 Result<void>
 Mu::mu_cmd_find(const Store& store, const Options& opts)
 {
-	auto expr{get_query(opts)};
+	auto expr{get_query(store, opts)};
 	if (!expr)
 		return Err(expr.error());
 
-	if (opts.find.format == Format::XQuery)
-		return print_internal(store, *expr, true, false);
-	else if (opts.find.format == Format::MQuery)
-		return print_internal(store, *expr, false, opts.verbose);
+	if (opts.find.analyze)
+		return analyze_query_expr(store, *expr, opts);
 	else
-		return process_query(store, *expr, opts);
+		return process_store_query(store, *expr, opts);
 }
-
-
 
 
 
@@ -551,7 +558,7 @@ search_func(const std::string& expr, size_t expected)
 static void
 test_mu_find_empty_query(void)
 {
-	search("\"\"", 13);
+	search("\"\"", 14);
 }
 
 static void
@@ -594,8 +601,8 @@ static void
 test_mu_find_mime(void)
 {
 	search("mime:image/jpeg", 1);
-	search("mime:text/plain", 13);
-	search("y:text*", 13);
+	search("mime:text/plain", 14);
+	search("y:text*", 14);
 	search("y:image*", 1);
 	search("mime:message/rfc822", 2);
 }

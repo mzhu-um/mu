@@ -68,11 +68,9 @@ struct Scanner::Private {
 	Private(const std::string& root_dir, Scanner::Handler handler, Mode mode):
 		root_dir_{root_dir}, handler_{handler}, mode_{mode} {
 		if (root_dir_.length() > PATH_MAX)
-			throw Mu::Error{Error::Code::InvalidArgument,
-				"path is too long"};
+			throw Mu::Error{Error::Code::InvalidArgument, "path is too long"};
 		if (!handler_)
-			throw Mu::Error{Error::Code::InvalidArgument,
-				"missing handler"};
+			throw Mu::Error{Error::Code::InvalidArgument, "missing handler"};
 	}
 	~Private() { stop(); }
 
@@ -105,20 +103,16 @@ ignore_dentry(const dentry_t& dentry)
 	    (d_name[2] == '\0' && d_name[0] == '.' && d_name[1] == '.'))
 		return true;
 
-	if (g_strcmp0(d_name, "tmp") == 0)
-			return true;
+	if (d_name[0] != 't' && d_name[0] != 'h' && d_name[0] != '.')
+		return false; /* don't ignore */
 
-	if (d_name[0] == '.') {
-		if (d_name[1] == '#') /* emacs? */
-			return true;
-		if (g_strcmp0(d_name + 1, "nnmaildir") == 0) /* gnus? */
-			return true;
-		if (g_strcmp0(d_name + 1, "notmuch") == 0) /* notmuch? */
-			return true;
-	}
+	if (::strcmp(d_name, "tmp") == 0 || ::strcmp(d_name, "hcache.db") == 0)
+		return true; // ignore
 
-	if (g_strcmp0(d_name, "hcache.db") == 0) /* mutt cache? */
-		return true;
+	if (d_name[0] == '.')
+		for (auto dname : { "nnmaildir", "notmuch", "noindex", "noupdate"})
+			if (::strcmp(d_name + 1, dname) == 0)
+				return true;
 
 	return false; /* don't ignore */
 }
@@ -256,14 +250,12 @@ Scanner::Private::start()
 {
 	const auto mode{F_OK | R_OK};
 	if (G_UNLIKELY(::access(root_dir_.c_str(), mode) != 0))
-		return Err(Error::Code::File,
-			   "'{}' is not readable: {}", root_dir_,
+		return Err(Error::Code::File, "'{}' is not readable: {}", root_dir_,
 			   g_strerror(errno));
 
 	struct stat statbuf {};
 	if (G_UNLIKELY(::stat(root_dir_.c_str(), &statbuf) != 0))
-		return Err(Error::Code::File,
-			   "'{}' is not stat'able: {}",
+		return Err(Error::Code::File,  "'{}' is not stat'able: {}",
 			   root_dir_, g_strerror(errno));
 
 	if (G_UNLIKELY(!S_ISDIR(statbuf.st_mode)))
@@ -273,8 +265,8 @@ Scanner::Private::start()
 	running_ = true;
 	mu_debug("starting scan @ {}", root_dir_);
 
-	auto basename{to_string_gchar(g_path_get_basename(root_dir_.c_str()))};
-	const auto is_maildir = basename == "cur" || basename == "new";
+	const auto bname{basename(root_dir_)};
+	const auto is_maildir = bname == "cur" || bname == "new";
 
 	const auto start{std::chrono::steady_clock::now()};
 	process_dir(root_dir_, is_maildir);
@@ -296,8 +288,7 @@ Scanner::Private::stop()
 
 Scanner::Scanner(const std::string& root_dir, Scanner::Handler handler, Mode flavor)
     : priv_{std::make_unique<Private>(root_dir, handler, flavor)}
-{
-}
+{}
 
 Scanner::~Scanner() = default;
 
@@ -328,10 +319,11 @@ Scanner::is_running() const
 
 
 #if BUILD_TESTS
+/* LCOV_EXCL_START*/
 #include "mu-test-utils.hh"
 
 static void
-test_scan_maildir()
+test_scan_maildirs()
 {
 	allow_warnings();
 
@@ -339,33 +331,66 @@ test_scan_maildir()
 	Scanner scanner{
 		MU_TESTMAILDIR,
 		[&](const std::string& fullpath, const struct stat* statbuf, auto&& htype) -> bool {
-			mu_debug("{} {}", fullpath, statbuf->st_size);
 			++count;
+			g_usleep(10000);
 			return true;
 		}};
-	g_assert_true(scanner.start());
+	assert_valid_result(scanner.start());
+	scanner.stop();
+	count = 0;
+	assert_valid_result(scanner.start());
 
-	while (scanner.is_running()) { g_usleep(1000); }
+	while (scanner.is_running()) { g_usleep(100000); }
 
 	// very rudimentary test...
 	g_assert_cmpuint(count,==,23);
 }
 
+static void
+test_count_maildirs()
+{
+	allow_warnings();
+
+	std::vector<std::string> dirs;
+	Scanner scanner{
+		MU_TESTMAILDIR2,
+		[&](const std::string& fullpath, const struct stat* statbuf, auto&& htype) -> bool {
+			dirs.emplace_back(basename(fullpath));
+			return true;
+		}, Scanner::Mode::MaildirsOnly};
+	assert_valid_result(scanner.start());
+
+	while (scanner.is_running()) { g_usleep(1000); }
+
+	g_assert_cmpuint(dirs.size(),==,3);
+	g_assert_true(seq_find_if(dirs, [](auto& p){return p == "bar";}) != dirs.end());
+	g_assert_true(seq_find_if(dirs, [](auto& p){return p == "Foo";}) != dirs.end());
+	g_assert_true(seq_find_if(dirs, [](auto& p){return p == "wom_bat";}) != dirs.end());
+}
+
+static void
+test_fail_nonexistent()
+{
+	allow_warnings();
+
+	Scanner scanner{"/foo/bar/non-existent",
+		[&](auto&& a1, auto&& a2, auto&& a3){ return false; }};
+	g_assert_false(scanner.is_running());
+	g_assert_false(!!scanner.start());
+	g_assert_false(scanner.is_running());
+}
+
+
 int
 main(int argc, char* argv[])
-try {
-	g_test_init(&argc, &argv, NULL);
+{
+	mu_test_init(&argc, &argv);
 
-	g_test_add_func("/index/scanner/scan-maildir", test_scan_maildir);
+	g_test_add_func("/scanner/scan-maildirs", test_scan_maildirs);
+	g_test_add_func("/scanner/count-maildirs", test_count_maildirs);
+	g_test_add_func("/scanner/fail-nonexistent", test_fail_nonexistent);
 
 	return g_test_run();
-
-} catch (const std::runtime_error& re) {
-	mu_printerrln("caught runtime error: {}", re.what());
-	return 1;
-} catch (...) {
-	mu_printerrln("caught exception");
-	return 1;
 }
 #endif /*BUILD_TESTS*/
 
@@ -392,4 +417,5 @@ main (int argc, char *argv[])
 
 	return 0;
 }
+/* LCOV_EXCL_STOP*/
 #endif /*BUILD_LIST_MAILDIRS*/

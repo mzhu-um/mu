@@ -23,6 +23,10 @@
 #include <message/mu-message.hh>
 #include <xapian.h>
 #include "utils/mu-utils.hh"
+
+#include <glib.h>
+#include <gmime/gmime.h>
+
 #include <fmt/ostream.h>
 
 #include <thirdparty/tabulate.hpp>
@@ -101,9 +105,9 @@ topic_fields(const Options& opts)
 	auto searchable=[&](const Field& field)->std::string {
 		if (field.is_boolean_term())
 			return "boolean";
-		if (field.is_indexable_term())
-			return "index";
-		if (field.is_normal_term())
+		if (field.is_phrasable_term())
+			return "phrase";
+		if (field.is_value())
 			return "yes";
 		if (field.is_contact())
 			return "contact";
@@ -202,6 +206,8 @@ topic_store(const Mu::Store& store, const Options& opts)
 		info.add_row({"ignored-address", c});
 
 	info.add_row({"messages in store", mu_format("{}", store.size())});
+	info.add_row({"support-ngrams",  conf.get<Config::Id::SupportNgrams>() ? "yes" : "no"});
+
 	info.add_row({"last-change", tstamp(store.statistics().last_change)});
 	info.add_row({"last-index",  tstamp(store.statistics().last_index)});
 
@@ -214,6 +220,15 @@ topic_store(const Mu::Store& store, const Options& opts)
 }
 
 static Result<void>
+topic_maildirs(const Mu::Store& store, const Options& opts)
+{
+	for (auto&& mdir: store.maildirs())
+		mu_println("{}", mdir);
+
+	return Ok();
+}
+
+static Result<void>
 topic_mu(const Options& opts)
 {
 	Table info;
@@ -221,12 +236,16 @@ topic_mu(const Options& opts)
 	using namespace tabulate;
 
 	info.add_row({"property", "value", "description"});
-	info.add_row({"mu-version", std::string{VERSION},
-			"Mu runtime version"});
-	info.add_row({"xapian-version", Xapian::version_string(),
-			"Xapian runtime version"});
+	info.add_row({"mu-version", std::string{VERSION}, "Mu runtime version"});
+	info.add_row({"xapian-version", Xapian::version_string(), "Xapian runtime version"});
+	info.add_row({"gmime-version",
+			mu_format("{}.{}.{}", gmime_major_version, gmime_minor_version,
+				  gmime_micro_version), "GMime runtime version"});
+	info.add_row({"glib-version",
+			mu_format("{}.{}.{}", glib_major_version, glib_minor_version,
+				  glib_micro_version), "GLib runtime version"});
 	info.add_row({"schema-version", mu_format("{}", MU_STORE_SCHEMA_VERSION),
-			"Version of the database schema"});
+			"Version of mu's database schema"});
 
 	info.add_row({"cld2-support",
 #if HAVE_CLD2
@@ -269,6 +288,8 @@ Mu::mu_cmd_info(const Mu::Store& store, const Options& opts)
 	const auto topic{opts.info.topic};
 	if (topic == "store")
 		return topic_store(store, opts);
+	else if (topic == "maildirs")
+		return topic_maildirs(store, opts);
 	else if (topic == "fields") {
 		topic_fields(opts);
 		std::cout << std::endl;
@@ -286,8 +307,9 @@ Mu::mu_cmd_info(const Mu::Store& store, const Options& opts)
 					 col.fg(Color::Green), t, col.reset(), d);
 		};
 
-		mu_println("\nother info topics ('mu info <topic>'):\n{}\n{}",
+		mu_println("\nother info topics ('mu info <topic>'):\n{}\n{}\n{}",
 			   topic("store", "information about the message store (database)"),
+			   topic("maildirs", "list the maildirs under the store's root-maildir"),
 			   topic("fields",  "information about message fields"));
 	}
 

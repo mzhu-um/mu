@@ -1,4 +1,4 @@
-;;; mu4e-update.el -- part of mu4e, -*- lexical-binding: t -*-
+;;; mu4e-update.el --- Update the mu4e message store -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2011-2023 Dirk-Jan C. Binnema
 
@@ -257,6 +257,7 @@ To override this behavior, customize `display-buffer-alist'."
     (when (get-buffer mu4e-last-update-buffer)
       (kill-buffer mu4e-last-update-buffer))
     (with-current-buffer mu4e--update-buffer
+      (special-mode)
       (clone-buffer mu4e-last-update-buffer))
     ;; and kill the buffer itself; the cloning is needed
     ;; so the temp window handling works as expected.

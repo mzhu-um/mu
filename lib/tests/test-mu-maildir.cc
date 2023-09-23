@@ -28,130 +28,91 @@
 
 #include "utils/mu-test-utils.hh"
 #include "mu-maildir.hh"
+#include "utils/mu-utils.hh"
+#include "utils/mu-utils-file.hh"
 #include "utils/mu-result.hh"
 
 using namespace Mu;
 
 static void
-test_maildir_mkdir_01(void)
+test_maildir_mkdir_01()
 {
-	int          i;
-	gchar *      tmpdir, *mdir, *tmp;
-	const gchar* subs[] = {"tmp", "cur", "new"};
+	TempDir temp_dir;
+	auto mdir = join_paths(temp_dir.path(), "cuux");
+	auto res{maildir_mkdir(mdir, 0755, false/*!noindex*/)};
+	assert_valid_result(res);
 
-	tmpdir = test_mu_common_get_random_tmpdir();
-	mdir   = g_strdup_printf("%s%c%s", tmpdir, G_DIR_SEPARATOR, "cuux");
-
-	g_assert_true(!!maildir_mkdir(mdir, 0755, FALSE));
-
-	for (i = 0; i != G_N_ELEMENTS(subs); ++i) {
-		gchar* dir;
-
-		dir = g_strdup_printf("%s%c%s", mdir, G_DIR_SEPARATOR, subs[i]);
-		g_assert_cmpuint(g_access(dir, R_OK), ==, 0);
-		g_assert_cmpuint(g_access(dir, W_OK), ==, 0);
-		g_free(dir);
+	for (auto sub : {"tmp", "cur", "new"}) {
+		auto subpath = join_paths(mdir, sub);
+		g_assert_cmpuint(g_access(subpath.c_str(), R_OK), ==, 0);
+		g_assert_cmpuint(g_access(subpath.c_str(), W_OK), ==, 0);
 	}
 
-	tmp = g_strdup_printf("%s%c%s", mdir, G_DIR_SEPARATOR, ".noindex");
-	g_assert_cmpuint(g_access(tmp, F_OK), !=, 0);
-
-	g_free(tmp);
-	g_free(tmpdir);
-	g_free(mdir);
+	auto noindex = join_paths(mdir, ".noindex");
+	g_assert_cmpuint(g_access(noindex.c_str(), F_OK), !=, 0);
 }
 
 static void
-test_maildir_mkdir_02(void)
+test_maildir_mkdir_02()
 {
-	int          i;
-	gchar *      tmpdir, *mdir, *tmp;
-	const gchar* subs[] = {"tmp", "cur", "new"};
+	TempDir temp_dir;
+	auto mdir = join_paths(temp_dir.path(), "cuux");
+	auto res{maildir_mkdir(mdir, 0755, true/*noindex*/)};
+	assert_valid_result(res);
 
-	tmpdir = test_mu_common_get_random_tmpdir();
-	mdir   = g_strdup_printf("%s%c%s", tmpdir, G_DIR_SEPARATOR, "cuux");
-
-	g_assert_true(!!maildir_mkdir(mdir, 0755, TRUE));
-
-	for (i = 0; i != G_N_ELEMENTS(subs); ++i) {
-		gchar* dir;
-
-		dir = g_strdup_printf("%s%c%s", mdir, G_DIR_SEPARATOR, subs[i]);
-		g_assert_cmpuint(g_access(dir, R_OK), ==, 0);
-
-		g_assert_cmpuint(g_access(dir, W_OK), ==, 0);
-		g_free(dir);
+	for (auto sub : {"tmp", "cur", "new"}) {
+		auto subpath = join_paths(mdir, sub);
+		g_assert_cmpuint(g_access(subpath.c_str(), R_OK), ==, 0);
+		g_assert_cmpuint(g_access(subpath.c_str(), W_OK), ==, 0);
 	}
 
-	tmp = g_strdup_printf("%s%c%s", mdir, G_DIR_SEPARATOR, ".noindex");
-	g_assert_cmpuint(g_access(tmp, F_OK), ==, 0);
-
-	g_free(tmp);
-	g_free(tmpdir);
-	g_free(mdir);
+	auto noindex = join_paths(mdir, ".noindex");
+	g_assert_cmpuint(g_access(noindex.c_str(), F_OK), ==, 0);
 }
 
 static void
-test_maildir_mkdir_03(void)
+test_maildir_mkdir_03()
 {
-	int          i;
-	gchar *      tmpdir, *mdir, *tmp;
-	const gchar* subs[] = {"tmp", "cur", "new"};
+	TempDir temp_dir;
+	auto mdir = join_paths(temp_dir.path(), "cuux");
 
-	tmpdir = test_mu_common_get_random_tmpdir();
-	mdir   = g_strdup_printf("%s%c%s", tmpdir, G_DIR_SEPARATOR, "cuux");
+	// create part already
+	auto curdir = join_paths(mdir, "cur");
+	g_assert_cmpuint(g_mkdir_with_parents(curdir.c_str(), 0755), ==, 0);
 
-	/* create part of the structure already... */
-	{
-		gchar* dir;
-		dir = g_strdup_printf("%s%ccur", mdir, G_DIR_SEPARATOR);
-		g_assert_cmpuint(g_mkdir_with_parents(dir, 0755), ==, 0);
-		g_free(dir);
+	auto res{maildir_mkdir(mdir, 0755, false/*!noindex*/)};
+	assert_valid_result(res);
+
+	// should still work.
+	for (auto sub : {"tmp", "cur", "new"}) {
+		auto subpath = join_paths(mdir, sub);
+		g_assert_cmpuint(g_access(subpath.c_str(), R_OK), ==, 0);
+		g_assert_cmpuint(g_access(subpath.c_str(), W_OK), ==, 0);
 	}
 
-	/* this should still work */
-	g_assert_true(!!maildir_mkdir(mdir, 0755, FALSE));
-
-	for (i = 0; i != G_N_ELEMENTS(subs); ++i) {
-		gchar* dir;
-
-		dir = g_strdup_printf("%s%c%s", mdir, G_DIR_SEPARATOR, subs[i]);
-		g_assert_cmpuint(g_access(dir, R_OK), ==, 0);
-		g_assert_cmpuint(g_access(dir, W_OK), ==, 0);
-		g_free(dir);
-	}
-
-	tmp = g_strdup_printf("%s%c%s", mdir, G_DIR_SEPARATOR, ".noindex");
-	g_assert_cmpuint(g_access(tmp, F_OK), !=, 0);
-
-	g_free(tmp);
-	g_free(tmpdir);
-	g_free(mdir);
+	auto noindex = join_paths(mdir, ".noindex");
+	g_assert_cmpuint(g_access(noindex.c_str(), F_OK), !=, 0);
 }
 
+
 static void
-test_maildir_mkdir_04(void)
+test_maildir_mkdir_04()
 {
-	gchar *tmpdir, *mdir;
-
-	tmpdir = test_mu_common_get_random_tmpdir();
-	mdir   = g_strdup_printf("%s%c%s", tmpdir, G_DIR_SEPARATOR, "cuux");
-
-	/* create part of the structure already... */
-	{
-		gchar* dir;
-		g_assert_cmpuint(g_mkdir_with_parents(mdir, 0755), ==, 0);
-		dir = g_strdup_printf("%s%ccur", mdir, G_DIR_SEPARATOR);
-		g_assert_cmpuint(g_mkdir_with_parents(dir, 0000), ==, 0);
-		g_free(dir);
+	if (geteuid() == 0) {
+		g_test_skip("not useful when run as root");
+		return;
 	}
+
+	TempDir temp_dir;
+	auto mdir = join_paths(temp_dir.path(), "cuux");
+	g_assert_cmpuint(g_mkdir_with_parents(mdir.c_str(), 0755), ==, 0);
+
+	auto curdir = join_paths(mdir, "cur");
+	g_assert_cmpuint(g_mkdir_with_parents(curdir.c_str(), 0000), ==, 0);
 
 	/* this should fail now, because cur is not read/writable  */
-	if (geteuid() != 0)
-		g_assert_false(!!maildir_mkdir(mdir, 0755, false));
-
-	g_free(tmpdir);
-	g_free(mdir);
+	auto res = maildir_mkdir(mdir, 0755, false);
+	g_assert_false(!!res);
 }
 
 static gboolean
@@ -402,8 +363,9 @@ test_maildir_get_new_path_02(void)
 	}
 }
 
+
 static void
-test_maildir_get_new_path_custom(void)
+test_maildir_get_new_path_custom_real(bool change_name)
 {
 	struct {
 		std::string	oldpath;
@@ -432,11 +394,29 @@ test_maildir_get_new_path_custom(void)
 						      paths[1].root_maildir,
 						      paths[i].targetdir,
 						      paths[i].flags,
-						      false)};
+						      change_name)};
 		assert_valid_result(newpath);
-		assert_equal(*newpath, paths[i].newpath);
+		if (change_name)
+			g_assert_true(*newpath != paths[i].newpath); // weak test
+		else
+			assert_equal(*newpath, paths[i].newpath);
 	}
 }
+
+
+static void
+test_maildir_get_new_path_custom(void)
+{
+	return test_maildir_get_new_path_custom_real(false);
+}
+
+
+static void
+test_maildir_get_new_path_custom_change_name(void)
+{
+	return test_maildir_get_new_path_custom_real(true);
+}
+
 
 static void
 test_maildir_from_path(void)
@@ -545,32 +525,30 @@ test_maildir_move_gio()
 int
 main(int argc, char* argv[])
 {
-	g_test_init(&argc, &argv, NULL);
+	mu_test_init(&argc, &argv);
 
 	/* mu_util_maildir_mkmdir */
-	g_test_add_func("/mu-maildir/mu-maildir-mkdir-01", test_maildir_mkdir_01);
-	g_test_add_func("/mu-maildir/mu-maildir-mkdir-02", test_maildir_mkdir_02);
-	g_test_add_func("/mu-maildir/mu-maildir-mkdir-03", test_maildir_mkdir_03);
-	g_test_add_func("/mu-maildir/mu-maildir-mkdir-04", test_maildir_mkdir_04);
-	g_test_add_func("/mu-maildir/mu-maildir-mkdir-05", test_maildir_mkdir_05);
+	g_test_add_func("/maildir/mkdir-01", test_maildir_mkdir_01);
+	g_test_add_func("/maildir/mkdir-02", test_maildir_mkdir_02);
+	g_test_add_func("/maildir/mkdir-03", test_maildir_mkdir_03);
+	g_test_add_func("/maildir/mkdir-04", test_maildir_mkdir_04);
+	g_test_add_func("/maildir/mkdir-05", test_maildir_mkdir_05);
 
-	g_test_add_func("/mu-maildir/mu-maildir-determine-target-ok",
-			test_determine_target_ok);
-	g_test_add_func("/mu-maildir/mu-maildir-determine-target-fail",
-			test_determine_target_fail);
+	g_test_add_func("/maildir/determine-target-ok", test_determine_target_ok);
+	g_test_add_func("/maildir/determine-target-fail", test_determine_target_fail);
 
 	// /* get/set flags */
-	g_test_add_func("/mu-maildir/mu-maildir-get-new-path-01", test_maildir_get_new_path_01);
-	g_test_add_func("/mu-maildir/mu-maildir-get-new-path-02", test_maildir_get_new_path_02);
-	g_test_add_func("/mu-maildir/mu-maildir-get-new-path-custom",
-			test_maildir_get_new_path_custom);
-	g_test_add_func("/mu-maildir/mu-maildir-from-path",
-			test_maildir_from_path);
+	g_test_add_func("/maildir/get-new-path-01", test_maildir_get_new_path_01);
+	g_test_add_func("/maildir/get-new-path-02", test_maildir_get_new_path_02);
+	g_test_add_func("/maildir/get-new-path-custom", test_maildir_get_new_path_custom);
+	g_test_add_func("/maildir/get-new-path-custom-change-name",
+			test_maildir_get_new_path_custom_change_name);
 
-	g_test_add_func("/mu-maildir/mu-maildir-link", test_maildir_link);
+	g_test_add_func("/maildir/from-path", test_maildir_from_path);
 
-	g_test_add_func("/mu-maildir/mu-maildir-move-vanilla", test_maildir_move_vanilla);
-	g_test_add_func("/mu-maildir/mu-maildir-move-gio", test_maildir_move_gio);
+	g_test_add_func("/maildir/link", test_maildir_link);
+	g_test_add_func("/maildir/move-vanilla", test_maildir_move_vanilla);
+	g_test_add_func("/maildir/aildir-move-gio", test_maildir_move_gio);
 
 	return g_test_run();
 }

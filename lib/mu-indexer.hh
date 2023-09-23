@@ -61,7 +61,7 @@ public:
 	/**
 	 * Start indexing. If already underway, do nothing. This returns
 	 * immediately after starting, with the work being done in the
-	 * background.
+	 * background, unless blocking = true
 	 *
 	 * @param conf a configuration object
 	 *
@@ -69,14 +69,12 @@ public:
 	 * underway; false otherwise.
 	 *
 	 */
-	bool start(const Config& conf);
+	bool start(const Config& conf, bool block=false);
 
 	/**
 	 * Stop indexing. If not indexing, do nothing.
 	 *
-	 *
-	 * @return true if we stopped indexing, or indexing was not underway.
-	 * False otherwise.
+	 * @return true if we stopped indexing, or indexing was not underway; false otherwise.
 	 */
 	bool stop();
 
@@ -89,12 +87,10 @@ public:
 
 	// Object describing current progress
 	struct Progress {
-		void reset()
-		{
+		void reset() {
 			running = false;
 			checked = updated = removed = 0;
 		}
-
 		std::atomic<bool>   running{}; /**< Is an index operation in progress? */
 		std::atomic<size_t> checked{}; /**< Number of messages checked for changes */
 		std::atomic<size_t> updated{}; /**< Number of messages (re)parsed/added/updated */

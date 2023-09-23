@@ -1,4 +1,4 @@
-;;; mu4e-headers.el -- part of mu4e -*- lexical-binding: t; coding:utf-8 -*-
+;;; mu4e-headers.el --- Message headers -*- lexical-binding: t; coding:utf-8 -*-
 
 ;; Copyright (C) 2011-2023 Dirk-Jan C. Binnema
 
@@ -329,17 +329,19 @@ into a string."
   (let ((get-prefix
          (lambda (cell)
            (if mu4e-use-fancy-chars (cdr cell) (car cell)))))
-    (cl-case type
-      (child         (funcall get-prefix mu4e-headers-thread-child-prefix))
-      (first-child   (funcall get-prefix mu4e-headers-thread-first-child-prefix))
-      (last-child    (funcall get-prefix mu4e-headers-thread-last-child-prefix))
-      (connection    (funcall get-prefix mu4e-headers-thread-connection-prefix))
-      (blank         (funcall get-prefix mu4e-headers-thread-blank-prefix))
-      (orphan        (funcall get-prefix mu4e-headers-thread-orphan-prefix))
-      (single-orphan (funcall get-prefix
-                              mu4e-headers-thread-single-orphan-prefix))
-      (duplicate     (funcall get-prefix mu4e-headers-thread-duplicate-prefix))
-      (t              "?"))))
+    (propertize
+     (cl-case type
+       (child         (funcall get-prefix mu4e-headers-thread-child-prefix))
+       (first-child   (funcall get-prefix mu4e-headers-thread-first-child-prefix))
+       (last-child    (funcall get-prefix mu4e-headers-thread-last-child-prefix))
+       (connection    (funcall get-prefix mu4e-headers-thread-connection-prefix))
+       (blank         (funcall get-prefix mu4e-headers-thread-blank-prefix))
+       (orphan        (funcall get-prefix mu4e-headers-thread-orphan-prefix))
+       (single-orphan (funcall get-prefix
+                               mu4e-headers-thread-single-orphan-prefix))
+       (duplicate     (funcall get-prefix mu4e-headers-thread-duplicate-prefix))
+       (t              "?"))
+     'face 'mu4e-thread-fold-face)))
 
 
 ;; headers in the buffer are prefixed by an invisible string with the docid
@@ -806,9 +808,9 @@ true, do *not* update the query history stack."
       (setq list-buffers-directory rewritten-expr)
       (mu4e--modeline-update))
 
-    ;; when the buffer is already visible on the frame, select it; otherwise,
+    ;; when the buffer is already visible, select it; otherwise,
     ;; switch to it.
-    (unless (get-buffer-window buf)
+    (unless (get-buffer-window buf 0)
       (mu4e-display-buffer buf t))
     (run-hook-with-args 'mu4e-search-hook expr)
     (mu4e~headers-clear mu4e~search-message)

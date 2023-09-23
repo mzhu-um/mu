@@ -1,4 +1,4 @@
-;;; mu4e-lists.el -- part of mu4e -*- lexical-binding: t -*-
+;;; mu4e-lists.el --- Get names for mailing lists -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2011-2023 Dirk-Jan C. Binnema
 

@@ -45,14 +45,8 @@ test_cases(const CaseVec& cases, ProcFunc proc)
 {
 	for (const auto& casus : cases) {
 		const auto res = proc(casus.expr, casus.is_first);
-		if (g_test_verbose()) {
-			std::cout << "\n";
-			std::cout << casus.expr << ' ' << casus.is_first << std::endl;
-			std::cout << "exp: '" << casus.expected << "'" << std::endl;
-			std::cout << "got: '" << res << "'" << std::endl;
-		}
-
-		g_assert_true(casus.expected == res);
+		//mu_println("'{}'\n'{}'", casus.expected, res);
+		assert_equal(casus.expected, res);
 	}
 }
 
@@ -68,9 +62,10 @@ test_date_basic()
 	}
 
 	g_setenv("TZ", hki, TRUE);
-	constexpr std::array<std::tuple<const char*, bool/*is_first*/, int64_t>, 13> cases = {{
+	std::vector<std::tuple<const char*, bool/*is_first*/, int64_t>> cases = {{
 			{"2015-09-18T09:10:23", true, 1442556623},
 			{"1972-12-14T09:10:23", true, 93165023},
+			{"1972-12-14T09:10", true,    93165000},
 			{"1854-11-18T17:10:23", true, 0},
 
 			{"2000-02-31T09:10:23", true, 951861599},
@@ -158,9 +153,13 @@ static void
 test_flatten()
 {
 	CaseVec cases = {
-	    {"Менделе́ев", true, "менделеев"},
-	    {"", false, ""},
-	    {"Ångström", true, "angstrom"},
+	    {"Менделе́ев",	true, "менделеев"},
+	    {"",		true, ""},
+	    {"Ångström",	true, "angstrom"},
+	    {"đodø",		true, "dodo"},
+
+	    // don't touch combining characters in CJK etc.
+	    {"スポンサーシップ募集",true, "スポンサーシップ募集"}
 	};
 
 	test_cases(cases, [](auto s, auto f) { return utf8_flatten(s); });
@@ -184,13 +183,29 @@ static void
 test_clean()
 {
 	CaseVec cases = {
-	    {"\t a\t\nb ", true, "a  b"},
-	    {"", false, ""},
-	    {"Ångström", true, "Ångström"},
+	    {"\t a\t\nb ",	true, "a  b"},
+	    {"",		true, ""},
+	    {"Ångström",	true, "Ångström"},
+	    {"\345\245",	true, ".."},
 	};
 
 	test_cases(cases, [](auto s, auto f) { return utf8_clean(s); });
 }
+
+
+static void
+test_word_break()
+{
+	CaseVec cases = {
+	    {"aap+noot&mies",            true, "aap noot mies"},
+	    {"hallo",                    true, "hallo"},
+	    {"  foo-bar###cuux,fnorb  ", true, "foo bar cuux fnorb"},
+	    {"eyes\nof\tMedusa",         true, "eyes of Medusa"},
+	};
+
+	test_cases(cases, [](auto s, auto f) { return utf8_wordbreak(s); });
+}
+
 
 static void
 test_format()
@@ -317,6 +332,7 @@ main(int argc, char* argv[])
 	g_test_add_func("/utils/flatten", test_flatten);
 	g_test_add_func("/utils/remove-ctrl", test_remove_ctrl);
 	g_test_add_func("/utils/clean", test_clean);
+	g_test_add_func("/utils/word-break", test_word_break);
 	g_test_add_func("/utils/format", test_format);
 	g_test_add_func("/utils/summarize", test_summarize);
 	g_test_add_func("/utils/split", test_split);

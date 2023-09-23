@@ -44,6 +44,8 @@
 #include <glib/gprintf.h>
 
 #include "mu-utils.hh"
+#include "mu-unbroken.hh"
+
 #include "mu-error.hh"
 #include "mu-option.hh"
 
@@ -112,11 +114,27 @@ gx_utf8_flatten(const gchar* str, gssize len)
 
 } // namespace
 
+bool
+Mu::contains_unbroken_script(const char *str)
+{
+	while (str && *str) {
+		auto uc = g_utf8_get_char(str);
+		if (is_unbroken_script(uc))
+			return true;
+		str = g_utf8_next_char(str);
+	}
+
+	return false;
+}
+
 std::string // gx_utf8_flatten
 Mu::utf8_flatten(const char* str)
 {
 	if (!str)
 		return {};
+
+	if (contains_unbroken_script(str))
+		return std::string{str};
 
 	// the pure-ascii case
 	if (g_str_is_ascii(str)) {
@@ -188,6 +206,60 @@ Mu::utf8_clean(const std::string& dirty)
 
 	return std::string{g_strstrip(gstr->str)};
 }
+
+
+std::string
+Mu::utf8_wordbreak(const std::string& txt)
+{
+	g_autoptr(GString) gstr = g_string_sized_new(txt.length());
+
+	bool spc{};
+	for (auto cur = txt.c_str(); cur && *cur; cur = g_utf8_next_char(cur)) {
+		const gunichar uc = g_utf8_get_char(cur);
+
+		if (g_unichar_iscntrl(uc)) {
+			g_string_append_c(gstr, ' ');
+			continue;
+		}
+		// inspired by Xapian's termgenerator.
+
+		switch(uc) {
+		case '\'':
+		case '&':
+		case 0xb7:
+		case 0x5f4:
+		case 0x2019:
+		case 0x201b:
+		case 0x2027:
+		case ',':
+		case '.':
+		case ';':
+		case '+':
+		case '#':
+		case '-':
+		case 0x037e: // GREEK QUESTION MARK
+		case 0x0589: // ARMENIAN FULL STOP
+		case 0x060D: // ARABIC DATE SEPARATOR
+		case 0x07F8: // NKO COMMA
+		case 0x2044: // FRACTION SLASH
+		case 0xFE10: // PRESENTATION FORM FOR VERTICAL COMMA
+		case 0xFE13: // PRESENTATION FORM FOR VERTICAL COLON
+		case 0xFE14: // PRESENTATION FORM FOR VERTICAL SEMICOLON
+			if (spc)
+				break;
+			spc = true;
+			g_string_append_c(gstr, ' ');
+			break;
+		default:
+			spc = false;
+			g_string_append_unichar(gstr, uc);
+			break;
+		}
+	}
+
+	return std::string{g_strstrip(gstr->str)};
+}
+
 
 std::string
 Mu::remove_ctrl(const std::string& str)

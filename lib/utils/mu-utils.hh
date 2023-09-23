@@ -154,7 +154,19 @@ std::tm mu_time(T t={}, bool use_utc=false) {
 using StringVec = std::vector<std::string>;
 
 /**
- * Flatten a string -- downcase and fold diacritics etc.
+ * Does the string contain script without explicit word separators?
+ *
+ * @param str a string
+ *
+ * @return true or false
+ */
+bool contains_unbroken_script(const char* str);
+static inline bool contains_unbroken_script(const std::string& str) {
+	return contains_unbroken_script(str.c_str());
+}
+
+/**
+ * Flatten a string -- down-case and fold diacritics.
  *
  * @param str a string
  *
@@ -174,6 +186,17 @@ utf8_flatten(const std::string& s) {
  * @return a cleaned-up string.
  */
 std::string utf8_clean(const std::string& dirty);
+
+
+/**
+ * Replace all wordbreak chars (as recognized by Xapian by single SPC)
+ *
+ * @param txt text
+ *
+ * @return string
+ */
+std::string utf8_wordbreak(const std::string& txt);
+
 
 /**
  * Remove ctrl characters, replacing them with ' '; subsequent
@@ -401,6 +424,19 @@ to_string(const T& val)
 	sstr << val;
 
 	return sstr.str();
+}
+/**
+ * Convert to std::string to a std::string_view
+ * Careful with the lifetimes!
+ *
+ * @param s a string
+ *
+ * @return a string_view
+ */
+static inline std::string_view
+to_string_view(const std::string& s)
+{
+	return std::string_view{s.data(), s.size()};
 }
 
 /**

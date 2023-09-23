@@ -32,29 +32,6 @@
 namespace Mu {
 
 /**
- * Try to 'play' (ie., open with it's associated program) a file. On MacOS, the
- * the program 'open' is used for this; on other platforms 'xdg-open' to do the
- * actual opening. In addition you can set it to another program by setting thep
- * MU_PLAY_PROGRAM environment variable
- *
- * This requires a 'native' file, see g_file_is_native()
- *
- * @param path full path of the file to open
- *
- * @return Ok() if succeeded, some error otherwise.
- */
-Result<void> play(const std::string& path);
-
-/**
- * Find program in PATH
- *
- * @param name the name of the program
- *
- * @return either the full path to program, or Nothing if not found.
- */
-Option<std::string> program_in_path(const std::string& name);
-
-/**
  * Check if the directory has the given attributes
  *
  * @param path path to dir
@@ -73,7 +50,7 @@ bool check_dir(const std::string& path, bool readable, bool writeable);
  *
  * @return
  */
-std::string canonicalize_filename(const std::string& path, const std::string& relative_to);
+std::string canonicalize_filename(const std::string& path, const std::string& relative_to="");
 
 /**
  * Expand the filesystem path (as per wordexp(3))
@@ -85,8 +62,30 @@ std::string canonicalize_filename(const std::string& path, const std::string& re
 Result<std::string> expand_path(const std::string& str);
 
 
+/**
+ * Get the basename for path, i.e. without leading directory component,
+ * @see g_path_get_basename
+ *
+ * @param path
+ *
+ * @return the basename
+ */
+std::string basename(const std::string& path);
+
+
+/**
+ * Get the dirname for path, i.e. without leading directory component,
+ * @see g_path_get_dirname
+ *
+ * @param path
+ *
+ * @return the dirname
+ */
+std::string dirname(const std::string& path);
+
+
 /*
- * for OSs with out support for direntry->d_type, like Solaris
+ * for OSs without support for direntry->d_type, like Solaris
  */
 #ifndef DT_UNKNOWN
 enum {
@@ -121,7 +120,7 @@ enum {
  * @return DT_REG, DT_DIR, DT_LNK, or DT_UNKNOWN (other values are not supported
  * currently)
  */
-uint8_t determine_dtype(const std::string& path, bool use_lstat);
+uint8_t determine_dtype(const std::string& path, bool use_lstat=false);
 
 
 /**
@@ -227,22 +226,48 @@ Result<std::string> make_temp_dir();
  */
 Result<void> remove_directory(const std::string& path);
 
-
 /**
- * Run some system command
+ * Run some system command.
  *
- * @param cmd the command
+ * @param args a list of commmand line arguments (like argv)
+ * @param try_setsid whether to try setsid(2) (see its manpage for details) if this
+ *        system supports it.
  *
- * @return Ok(exit code) or an error. Note that exit-code != 0 is _not_
- * considered an error from the perspective of this function.
+ * @return Ok(exit code) or an error. Note that exit-code != 0 is _not_ considered an error from the
+ * perspective of run_command, but is for run_command0
  */
 struct CommandOutput {
 	int exit_code;
 	std::string standard_out;
 	std::string standard_err;
 };
-Result<CommandOutput> run_command(std::initializer_list<std::string> args);
+Result<CommandOutput> run_command(std::initializer_list<std::string> args,
+				  bool try_setsid=false);
+Result<CommandOutput> run_command0(std::initializer_list<std::string> args,
+				   bool try_setsid=false);
 
+/**
+ * Try to 'play' (ie., open with it's associated program) a file. On MacOS, the
+ * the program 'open' is used for this; on other platforms 'xdg-open' to do the
+ * actual opening. In addition you can set it to another program by setting thep
+ * MU_PLAY_PROGRAM environment variable
+ *
+ * This requires a 'native' file, see g_file_is_native()
+ *
+ * @param path full path of the file to open
+ *
+ * @return Ok() if succeeded, some error otherwise.
+ */
+Result<void> play(const std::string& path);
+
+/**
+ * Find program in PATH
+ *
+ * @param name the name of the program
+ *
+ * @return either the full path to program, or Nothing if not found.
+ */
+Option<std::string> program_in_path(const std::string& name);
 
 } // namespace Mu
 

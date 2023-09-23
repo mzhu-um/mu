@@ -77,7 +77,8 @@ xapian_try_result(Func&& func) noexcept -> std::decay_t<decltype(func())>
 try {
 	return func();
 } catch (const Xapian::DatabaseLockError& dlerr) {
-	return Err(Error::Code::StoreLock, "database locked");
+	return Err(Error{Error::Code::StoreLock, "database locked"}.
+		   add_hint("Perhaps mu is already running?"));
 } catch (const Xapian::Error& xerr) {
 	return Err(Error::Code::Xapian, "{}", xerr.get_error_string());
 } catch (const std::runtime_error& re) {
@@ -112,6 +113,13 @@ struct MetadataIface {
 /// In-memory db
 struct MemDb: public MetadataIface {
 	/**
+	 * Create a new memdb
+	 *
+	 * @param readonly read-only? (for testing)
+	 */
+	MemDb(bool readonly=false):read_only_{readonly} {}
+
+	/**
 	 * Set some metadata
 	 *
 	 * @param name key name
@@ -141,7 +149,7 @@ struct MemDb: public MetadataIface {
 	 *
 	 * @return true or false
 	 */
-	bool read_only() const override { return false; }
+	bool read_only() const override { return read_only_; }
 
 
 	/**
@@ -157,6 +165,7 @@ struct MemDb: public MetadataIface {
 
 private:
 	std::unordered_map<std::string, std::string> map_;
+	const bool read_only_;
 };
 
 /**
@@ -171,8 +180,8 @@ public:
 	 *
 	 */
 	enum struct Flavor {
-		ReadOnly,	/**< Read-only database */
-		Open,		/**< Open existing read-write */
+		ReadOnly,	 /**< Read-only database */
+		Open,		 /**< Open existing read-write */
 		CreateOverwrite, /**< Create new or overwrite existing */
 	};
 
@@ -191,6 +200,16 @@ public:
 	 * @return path to database
 	 */
 	const std::string& path() const;
+
+	/**
+	 * Get a description of the Xapian database
+	 *
+	 * @return description
+	 */
+	const std::string description() const {
+		return db().get_description();
+	}
+
 
 	/**
 	 * Get the number of documents (messages) in the database
@@ -398,6 +417,27 @@ private:
 
 	DbType db_;
 };
+
+constexpr std::string_view
+format_as(XapianDb::Flavor flavor)
+{
+	switch(flavor) {
+	case XapianDb::Flavor::CreateOverwrite:
+		return "create-overwrite";
+	case XapianDb::Flavor::Open:
+		return "open";
+	case XapianDb::Flavor::ReadOnly:
+		return "read-only";
+	default:
+		return "??";
+	}
+}
+
+static inline std::string
+format_as(const XapianDb& db)
+{
+	return mu_format("{} @ {}", db.description(), db.path());
+}
 
 } // namespace Mu
 

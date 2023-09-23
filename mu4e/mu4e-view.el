@@ -1,4 +1,4 @@
-;;; mu4e-view.el -- part of mu4et -*- lexical-binding: t -*-
+;;; mu4e-view.el --- Mode for viewing e-mail messages -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2021-2023 Dirk-Jan C. Binnema
 

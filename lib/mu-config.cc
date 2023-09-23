@@ -61,6 +61,8 @@ test_basic()
 	MemDb db;
 	Config conf_db{db};
 
+	g_assert_false(conf_db.read_only());
+
 	using Id = Config::Id;
 
 	{
@@ -69,10 +71,22 @@ test_basic()
 	}
 
 	{
-		conf_db.set<Id::RootMaildir>("/home/djcb/Maildir");
+		auto res = conf_db.set<Id::RootMaildir>("/home/djcb/Maildir");
+		assert_valid_result(res);
+
 		const auto rmd = conf_db.get<Id::RootMaildir>();
 		assert_equal(rmd, "/home/djcb/Maildir");
 	}
+}
+
+static void
+test_read_only()
+{
+	MemDb db{true/*read-only*/};
+	Config conf_db{db};
+
+	auto res = conf_db.set<Config::Id::MaxMessageSize>(12345);
+	g_assert_false(!!res);
 }
 
 int
@@ -82,6 +96,7 @@ main(int argc, char* argv[])
 
 	g_test_add_func("/config-db/props", test_props);
 	g_test_add_func("/config-db/basic", test_basic);
+	g_test_add_func("/config-db/read-only", test_read_only);
 
 	return g_test_run();
 }

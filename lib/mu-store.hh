@@ -17,22 +17,24 @@
 **
 */
 
-#ifndef __MU_STORE_HH__
-#define __MU_STORE_HH__
+#ifndef MU_STORE_HH__
+#define MU_STORE_HH__
 
 #include <string>
 #include <vector>
 #include <mutex>
 #include <ctime>
+#include <memory>
+
+#include <xapian.h>
 
 #include "mu-contacts-cache.hh"
 #include "mu-xapian-db.hh"
 #include "mu-config.hh"
-#include <xapian.h>
+#include "mu-indexer.hh"
+#include "mu-query-results.hh"
 
 #include <utils/mu-utils.hh>
-#include <index/mu-indexer.hh>
-#include <mu-query-results.hh>
 #include <utils/mu-utils.hh>
 #include <utils/mu-option.hh>
 
@@ -207,21 +209,7 @@ public:
 	Result<Id> add_message(Message& msg, bool use_transaction = false,
 			       bool is_new = false);
 	Result<Id> add_message(const std::string& path, bool use_transaction = false,
-			       bool is_new = false) {
-		if (auto msg{Message::make_from_path(path)}; !msg)
-			return Err(msg.error());
-		else
-			return add_message(msg.value(), use_transaction, is_new);
-	}
-
-	/**
-	 * Update a message in the store.
-	 *
-	 * @param msg a message
-	 * @param id the id for this message
-	 *
-	 * @return Ok() or an error.
-	 */
+			       bool is_new = false);
 
 	/**
 	 * Remove a message from the store. It will _not_ remove the message
@@ -258,7 +246,6 @@ public:
 	 */
 	Option<Message> find_message(Id id) const;
 
-
 	/**
 	 * Find the messages for the given ids
 	 *
@@ -288,7 +275,6 @@ public:
 	 */
 	bool contains_message(const std::string& path) const;
 
-
 	/**
 	 * Options for moving
 	 *
@@ -298,7 +284,6 @@ public:
 		ChangeName   = 1 << 0,	/**< Change the name when moving */
 		DupFlags     = 1 << 1,  /**< Update flags for duplicate messages too*/
 	};
-
 
 	/**
 	 * Move a message both in the filesystem and in the store. After a
@@ -437,6 +422,15 @@ public:
 	 */
 	std::vector<std::string> maildirs() const;
 
+
+	/**
+	 * Compatible message-options for this store
+	 *
+	 * @return message-options.
+	 */
+	Message::Options message_options() const;
+
+
 	/*
 	 * _almost_ private
 	 */
@@ -474,6 +468,13 @@ private:
 MU_ENABLE_BITOPS(Store::Options);
 MU_ENABLE_BITOPS(Store::MoveOptions);
 
+static inline std::string
+format_as(const Store& store)
+{
+	return mu_format("store ({}/{})", format_as(store.xapian_db()),
+			 store.root_maildir());
+}
+
 } // namespace Mu
 
-#endif /* __MU_STORE_HH__ */
+#endif /* MU_STORE_HH__ */

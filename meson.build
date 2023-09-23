@@ -17,7 +17,7 @@
 ################################################################################
 # project setup
 project('mu', ['c', 'cpp'],
-        version: '1.11.16',
+        version: '1.11.20',
         meson_version: '>= 0.56.0',
         license: 'GPL-3.0-or-later',
         default_options : [
@@ -46,6 +46,11 @@ endif
 ################################################################################
 # compilers / flags
 #
+
+# compilers
+cc = meson.get_compiler('c')
+cxx= meson.get_compiler('cpp')
+
 extra_flags = [
   '-Wno-unused-parameter',
   '-Wno-cast-function-type',
@@ -53,33 +58,36 @@ extra_flags = [
   '-Wformat=2',
   '-Wstack-protector',
   '-Wno-switch-enum',
-  '-Wno-volatile',
   # assuming these are false alarm... (in fmt, with gcc13):
   '-Wno-array-bounds',
-  '-Wno-stringop-overflow',
-# clang
-  '-Wc11-extensions', # for clang
-  '-Wno-keyword-macro',
-  '-Wno-deprecated-volatile',
-  '-Wno-#warnings',
+  '-Wno-stringop-overflow']
+
+if (cxx.get_id() == 'clang')
+  extra_flags += [
+    '-Wc11-extensions',
+    '-Wno-keyword-macro',
+    '-Wno-deprecated-volatile',
+    '-Wno-#warnings']
+endif
+
+extra_cpp_flags= [
+  '-Wno-volatile'
 ]
 
 if get_option('buildtype') == 'debug'
   extra_flags += [
     '-ggdb',
-    '-fvar-tracking',
-    '-fvar-tracking-assignments']
+    '-g3']
 endif
-
-# compilers
-cc = meson.get_compiler('c')
-cxx= meson.get_compiler('cpp')
 
 # extra arguments, if available
 foreach extra_arg : extra_flags
   if cc.has_argument (extra_arg)
     add_project_arguments([extra_arg], language: 'c')
   endif
+endforeach
+
+foreach extra_arg : extra_flags + extra_cpp_flags
   if cxx.has_argument (extra_arg)
     add_project_arguments([extra_arg], language: 'cpp')
   endif
@@ -135,7 +143,7 @@ else
   message('no wordexp, no command-line option expansion')
 endif
 
-testmaildir=join_paths(meson.current_source_dir(), 'lib', 'tests')
+testmaildir=join_paths(meson.current_source_dir(), 'testdata')
 config_h_data.set_quoted('MU_TESTMAILDIR',  join_paths(testmaildir, 'testdir'))
 config_h_data.set_quoted('MU_TESTMAILDIR2',  join_paths(testmaildir, 'testdir2'))
 config_h_data.set_quoted('MU_TESTMAILDIR4',  join_paths(testmaildir, 'testdir4'))
@@ -149,8 +157,16 @@ gobject_dep    = dependency('gobject-2.0', version: '>= 2.60')
 gio_dep        = dependency('gio-2.0', version: '>= 2.60')
 gio_unix_dep   = dependency('gio-unix-2.0', version: '>= 2.60')
 gmime_dep      = dependency('gmime-3.0', version: '>= 3.2')
-xapian_dep     = dependency('xapian-core', version:'>= 1.4')
 thread_dep     = dependency('threads')
+
+# we need Xapian 1.4; if we have 1.4.23, we have some newer APIs.
+xapian_dep     = dependency('xapian-core', version:'>= 1.4.23', required:false)
+if xapian_dep.found()
+  config_h_data.set('HAVE_XAPIAN_FLAG_NGRAMS', 1)
+else
+  xapian_dep = dependency('xapian-core', version:'>= 1.4')
+  message('Found xapian ' + xapian_dep.version())
+endif
 
 # optionally, use Compact Language Detector2 if we can find it.
 cld2_dep = meson.get_compiler('cpp').find_library('cld2', required: false)
@@ -159,8 +175,6 @@ if cld2_dep.found()
 else
   message('CLD2 not found; no support for language detection')
 endif
-
-dependency('cld2', required : false)
 
 # note: these are for the unit-tests
 

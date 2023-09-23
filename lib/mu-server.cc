@@ -18,9 +18,9 @@
 */
 
 #include "config.h"
+#include "mu-server.hh"
 
 #include "message/mu-message.hh"
-#include "mu-server.hh"
 
 #include <fstream>
 #include <sstream>
@@ -39,7 +39,6 @@
 
 #include "mu-maildir.hh"
 #include "mu-query.hh"
-#include "index/mu-indexer.hh"
 #include "mu-store.hh"
 
 #include "utils/mu-utils.hh"
@@ -50,6 +49,8 @@
 #include "utils/mu-readline.hh"
 
 using namespace Mu;
+
+/* LCOV_EXCL_START */
 
 /// output stream to _either_ a file or to a stringstream
 struct OutputStream {
@@ -107,7 +108,7 @@ struct OutputStream {
 	 * longer needed.
 	 */
 	void unlink () {
-		if (!fname_.empty())
+		if (fname_.empty())
 			return;
 		if (auto&&res{::unlink(fname_.c_str())}; res != 0)
 			mu_warning("failed to unlink '{}'", ::strerror(res));
@@ -709,7 +710,7 @@ Server::Private::output_results(const QueryResults& qres, size_t batch_size) con
 	// structured bindings / lambda don't work with some clang.
 
 	mu_print(out, "(");
-	for(auto&& mi: qres) {
+	for (auto&& mi: qres) {
 
 		auto msg{mi.message()};
 		if (!msg)
@@ -1170,3 +1171,5 @@ Server::invoke(const std::string& expr) noexcept
 {
 	return priv_->invoke(expr);
 }
+
+/* LCOV_EXCL_STOP */

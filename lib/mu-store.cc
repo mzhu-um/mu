@@ -18,28 +18,23 @@
 */
 
 #include "config.h"
+#include "mu-store.hh"
 
 #include <chrono>
-#include <memory>
 #include <mutex>
 #include <array>
 #include <cstdlib>
 #include <stdexcept>
-#include <string>
 #include <unordered_map>
 #include <atomic>
 #include <type_traits>
 #include <iostream>
 #include <cstring>
 
-#include <vector>
-#include <xapian.h>
-
 #include "mu-maildir.hh"
-#include "mu-store.hh"
 #include "mu-query.hh"
 #include "mu-xapian-db.hh"
-#include "index/mu-scanner.hh"
+#include "mu-scanner.hh"
 
 #include "utils/mu-error.hh"
 
@@ -70,7 +65,8 @@ struct Store::Private {
 				    : XapianDb::Flavor::Open)},
 		config_{xapian_db_},
 		contacts_cache_{config_},
-		root_maildir_{remove_slash(config_.get<Config::Id::RootMaildir>())}
+		root_maildir_{remove_slash(config_.get<Config::Id::RootMaildir>())},
+		message_opts_{make_message_options(config_)}
 		{}
 
 	Private(const std::string& path, const std::string& root_maildir,
@@ -78,7 +74,8 @@ struct Store::Private {
 		xapian_db_{XapianDb(path, XapianDb::Flavor::CreateOverwrite)},
 		config_{make_config(xapian_db_, root_maildir, conf)},
 		contacts_cache_{config_},
-		root_maildir_{remove_slash(config_.get<Config::Id::RootMaildir>())}
+		root_maildir_{remove_slash(config_.get<Config::Id::RootMaildir>())},
+		message_opts_{make_message_options(config_)}
 		{}
 
 	~Private() try {
@@ -133,6 +130,13 @@ struct Store::Private {
 		return config;
 	}
 
+	Message::Options make_message_options(const Config& conf) {
+		if (conf.get<Config::Id::SupportNgrams>())
+			return Message::Options::SupportNgrams;
+		else
+			return Message::Options::None;
+	}
+
 	Option<Message> find_message_unlocked(Store::Id docid) const;
 	Store::IdVec find_duplicates_unlocked(const Store& store,
 					      const std::string& message_id) const;
@@ -150,7 +154,8 @@ struct Store::Private {
 	ContactsCache            contacts_cache_;
 	std::unique_ptr<Indexer> indexer_;
 
-	const std::string root_maildir_;
+	const std::string	root_maildir_;
+	const Message::Options	message_opts_;
 
 	size_t     transaction_size_{};
 	std::mutex lock_;
@@ -236,7 +241,8 @@ Store::Store(const std::string& path, Store::Options opts)
 		if (s_version < 500)
 			throw Mu::Error(Error::Code::CannotReinit,
 					"old schema ({}) is too old to re-initialize from",
-					s_version);
+					s_version).add_hint("Invoke 'mu init' without '--reinit'; "
+							    "see mu-init(1) for details");
 		const auto old_root_maildir{root_maildir()};
 
 		MemDb mem_db;
@@ -253,7 +259,8 @@ Store::Store(const std::string& path, Store::Options opts)
 	if (s_version != ExpectedSchemaVersion)
 		throw Mu::Error(Error::Code::SchemaMismatch,
 				"expected schema-version {}, but got {}",
-				ExpectedSchemaVersion, s_version);
+				ExpectedSchemaVersion, s_version).
+			add_hint("Please (re)initialize with 'mu init'; see mu-init(1) for details");
 }
 
 Store::Store(const std::string& path,
@@ -340,6 +347,11 @@ Store::add_message(Message& msg, bool use_transaction, bool is_new)
 	if (auto&& res = msg.set_maildir(mdir.value()); !res)
 		return Err(res.error());
 
+	// we shouldn't mix ngrams/non-ngrams messages.
+	if (any_of(msg.options() & Message::Options::SupportNgrams) !=
+	    any_of(message_options() & Message::Options::SupportNgrams))
+		return Err(Error::Code::InvalidArgument, "incompatible message options");
+
 	/* add contacts from this message to cache; this cache
 	 * also determines whether those contacts are _personal_, i.e. match
 	 * our personal addresses.
@@ -370,6 +382,16 @@ Store::add_message(Message& msg, bool use_transaction, bool is_new)
 
 	return res;
 }
+
+Result<Store::Id>
+Store::add_message(const std::string& path, bool use_transaction, bool is_new)
+{
+	if (auto msg{Message::make_from_path(path, priv_->message_opts_)}; !msg)
+		return Err(msg.error());
+	else
+		return add_message(msg.value(), use_transaction, is_new);
+}
+
 
 bool
 Store::remove_message(const std::string& path)
@@ -648,4 +670,10 @@ Store::maildirs() const
 	std::sort(mdirs.begin(), mdirs.end());
 
 	return mdirs;
+}
+
+Message::Options
+Store::message_options() const
+{
+	return priv_->message_opts_;
 }

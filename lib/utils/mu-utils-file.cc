@@ -35,64 +35,6 @@
 using namespace Mu;
 
 
-Mu::Option<std::string>
-Mu::program_in_path(const std::string& name)
-{
-	if (char *path = g_find_program_in_path(name.c_str()); path)
-		return to_string_gchar(std::move(path)/*consumes*/);
-	else
-		return Nothing;
-}
-
-/*
- * Set the child to a group leader to avoid being killed when the
- * parent group is killed.
- */
-static void
-maybe_setsid (G_GNUC_UNUSED gpointer user_data)
-{
-#if HAVE_SETSID
-	setsid();
-#endif /*HAVE_SETSID*/
-}
-
-Mu::Result<void>
-Mu::play (const std::string& path)
-{
-	/* check nativity */
-	GFile	*gf	   = g_file_new_for_path(path.c_str());
-	auto	 is_native = g_file_is_native(gf);
-	g_object_unref(gf);
-	if (!is_native)
-		return Err(Error::Code::File, "'{}' is not a native file", path);
-
-	const char *prog{g_getenv ("MU_PLAY_PROGRAM")};
-	if (!prog) {
-#ifdef __APPLE__
-		prog = "open";
-#else
-		prog = "xdg-open";
-#endif /*!__APPLE__*/
-	}
-
-	const auto program_path{program_in_path(prog)};
-	if (!program_path)
-		return Err(Error::Code::File, "cannot find '{}' in path", prog);
-
-	const gchar *argv[3]{};
-	argv[0] = program_path->c_str();
-	argv[1] = path.c_str();
-	argv[2] = nullptr;
-
-	GError *err{};
-	if (!g_spawn_async ({}, (gchar**)&argv, {}, G_SPAWN_SEARCH_PATH, maybe_setsid,
-			    {}, {}, &err))
-		return Err(Error::Code::File, &err/*consumes*/,
-			   "failed to open '{}' with '{}'", path, *program_path);
-	return Ok();
-}
-
-
 bool
 Mu::check_dir (const std::string& path, bool readable, bool writeable)
 {
@@ -149,6 +91,18 @@ Mu::canonicalize_filename(const std::string& path, const std::string& relative_t
 		str.erase(str.length() - 1);
 
 	return str;
+}
+
+std::string
+Mu::basename(const std::string& path)
+{
+	return to_string_gchar(g_path_get_basename(path.c_str()));
+}
+
+std::string
+Mu::dirname(const std::string& path)
+{
+	return to_string_gchar(g_path_get_dirname(path.c_str()));
 }
 
 Result<std::string>
@@ -208,7 +162,7 @@ Mu::runtime_path(Mu::RuntimePath path, const std::string& muhome)
 		throw std::logic_error("unknown path");
 	}
 }
-
+/* LCOV_EXCL_START*/
 static gpointer
 cancel_wait(gpointer data)
 {
@@ -256,7 +210,7 @@ Mu::g_cancellable_new_with_timeout(guint timeout)
 
 	return cancel;
 }
-
+/* LCOV_EXCL_STOP*/
 
 Result<std::string>
 Mu::read_from_stdin()
@@ -281,8 +235,22 @@ Mu::read_from_stdin()
 			g_memory_output_stream_get_size(G_MEMORY_OUTPUT_STREAM(outmem))});
 }
 
+
+
+/*
+ * Set the child to a group leader to avoid being killed when the
+ * parent group is killed.
+ */
+static void
+maybe_setsid (G_GNUC_UNUSED gpointer user_data)
+{
+#if HAVE_SETSID
+	setsid();
+#endif /*HAVE_SETSID*/
+}
+
 Result<Mu::CommandOutput>
-Mu::run_command(std::initializer_list<std::string> args)
+Mu::run_command(std::initializer_list<std::string> args, bool try_setsid)
 {
 	std::vector<char*> argvec{};
 	for (auto&& arg: args)
@@ -303,9 +271,8 @@ Mu::run_command(std::initializer_list<std::string> args)
 				static_cast<char**>(argvec.data()),
 				{},
 				(GSpawnFlags)(G_SPAWN_SEARCH_PATH),
-				{}, {},
-				&std_out, &std_err,
-				&wait_status, &err);
+				try_setsid ? maybe_setsid : nullptr, {},
+				&std_out, &std_err, &wait_status, &err);
 
 	for (auto& a: argvec)
 		g_free(a);
@@ -318,6 +285,60 @@ Mu::run_command(std::initializer_list<std::string> args)
 				to_string_gchar(std::move(std_out/*consumed*/)),
 				to_string_gchar(std::move(std_err/*consumed*/))});
 }
+
+Result<Mu::CommandOutput>
+Mu::run_command0(std::initializer_list<std::string> args, bool try_setsid)
+{
+	if (auto&& res{run_command(args, try_setsid)}; !res)
+		return res;
+	else if (res->exit_code != 0)
+		return Err(Error::Code::File, "command ran with non-zero exit code");
+	else
+		return Ok(std::move(*res));
+}
+
+
+Mu::Option<std::string>
+Mu::program_in_path(const std::string& name)
+{
+	if (char *path = g_find_program_in_path(name.c_str()); path)
+		return to_string_gchar(std::move(path)/*consumes*/);
+	else
+		return Nothing;
+}
+
+
+/* LCOV_EXCL_START*/
+constexpr auto default_open_program =
+#ifdef __APPLE__
+		"open"
+#else
+		"xdg-open"
+#endif /*!__APPLE__*/
+	;
+
+Mu::Result<void>
+Mu::play (const std::string& path)
+{
+	/* check nativity */
+	GFile	*gf	   = g_file_new_for_path(path.c_str());
+	auto	 is_native = g_file_is_native(gf);
+	g_object_unref(gf);
+	if (!is_native)
+		return Err(Error::Code::File, "'{}' is not a native file", path);
+
+	auto mpp{g_getenv ("MU_PLAY_PROGRAM")};
+	const std::string prog{mpp ? mpp : default_open_program};
+
+	const auto program_path{program_in_path(prog)};
+	if (!program_path)
+		return Err(Error::Code::File, "cannot find '{}' in path", prog);
+	else if (auto&& res{run_command({*program_path, path}, true/*try-setsid*/)}; !res)
+		return Err(std::move(res.error()));
+	else
+		return Ok();
+}
+/* LCOV_EXCL_STOP*/
 
 
 Result<std::string>

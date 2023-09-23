@@ -155,24 +155,17 @@ get_target_fullpath(const std::string& src, const std::string& targetpath,
 	if (auto&& res = check_subdir(src, in_cur); !res)
 		return Err(std::move(res.error()));
 
-	const auto srcfile{to_string_gchar(g_path_get_basename(src.c_str()))};
+	const auto srcfile{basename(src)};
 
 	/* create target-path; note: make the filename *cough* unique by
 	 * including a hash of the srcname in the targetname. This helps if
 	 * there are copies of a message (which all have the same basename)
 	 */
-	std::string fulltargetpath;
 	if (unique_names)
-		fulltargetpath = join_paths(targetpath,
-					    in_cur ? "cur" : "new",
-					    mu_format("{:08x}-{}",
-						      g_str_hash(src.c_str()),
-						      srcfile));
+		return join_paths(targetpath, in_cur ? "cur" : "new",
+				  mu_format("{:08x}-{}", g_str_hash(src.c_str()), srcfile));
 	else
-		fulltargetpath = join_paths(targetpath,
-					    in_cur ? "cur" : "new",
-					    srcfile.c_str());
-	return fulltargetpath;
+		return join_paths(targetpath, in_cur ? "cur" : "new", srcfile.c_str());
 }
 
 Result<void>
@@ -212,23 +205,20 @@ clear_links(const std::string& path, DIR* dir)
 		switch(d_type) {
 		case DT_LNK:
 			if (::unlink(fullpath.c_str()) != 0) {
-				mu_warning("error unlinking {}: {}",
-					  fullpath, g_strerror(errno));
+				mu_warning("error unlinking {}: {}", fullpath, g_strerror(errno));
 				res = false;
 			}
 			break;
 		case  DT_DIR: {
 			DIR* subdir{::opendir(fullpath.c_str())};
 			if (!subdir) {
-				mu_warning("failed to open dir {}: {}", fullpath,
-					  g_strerror(errno));
+				mu_warning("error opening dir {}: {}", fullpath, g_strerror(errno));
 				res = false;
 			}
 			if (!clear_links(fullpath, subdir))
 				res = false;
 			::closedir(subdir);
-		}
-			break;
+		} break;
 		default:
 			break;
 		}
@@ -251,6 +241,7 @@ Mu::maildir_clear_links(const std::string& path)
 	return Ok();
 }
 
+/* LCOV_EXCL_START*/
 static Mu::Result<void>
 msg_move_verify(const std::string& src, const std::string& dst)
 {
@@ -270,7 +261,11 @@ msg_move_verify(const std::string& src, const std::string& dst)
 
 	return Ok();
 }
+/* LCOV_EXCL_STOP*/
 
+/* LCOV_EXCL_START*/
+// don't use this right now, since it gives as (false alarm)
+// valgrind warning in tests
 /* use GIO to move files; this is slower than rename() so only use
  * this when needed: when moving across filesystems */
 G_GNUC_UNUSED static Mu::Result<void>
@@ -291,25 +286,15 @@ msg_move_g_file(const std::string& src, const std::string& dst)
 	else
 		return Err(Error::Code::File, &err, "error moving {} -> {}", src, dst);
 }
+/* LCOV_EXCL_STOP*/
 
 /* use mv to move files; this is slower than rename() so only use this when
  * needed: when moving across filesystems */
 G_GNUC_UNUSED static Mu::Result<void>
 msg_move_mv_file(const std::string& src, const std::string& dst)
 {
-	const auto cmdline{mu_format("/bin/mv {} {}",
-				     to_string_gchar(g_shell_quote(src.c_str())),
-				     to_string_gchar(g_shell_quote(dst.c_str())))};
-	GError *err{};
-	int wait_status{};
-
-	mu_debug("{}", cmdline);
-
-	if (!g_spawn_command_line_sync(cmdline.c_str(), {}, {}, &wait_status, &err))
-		return Err(Error::Code::File, &err, "error moving {} -> {}", src, dst);
-	else if (auto&& res{WEXITSTATUS(wait_status)}; res != 0)
-		return Err(Error::Code::File, "error moving {} -> {}; err={}",
-			   src, dst, res);
+	if (auto res{run_command0({"/bin/mv", src, dst})}; !res)
+		return Err(Error::Code::File, "error moving {}->{}; err={}", src, dst, res.error());
 	else
 		return Ok();
 }
@@ -324,10 +309,11 @@ msg_move(const std::string& src, const std::string& dst, bool assume_remote)
 
 		if (::rename(src.c_str(), dst.c_str()) == 0) /* seems it worked; double-check */
 			return msg_move_verify(src, dst);
-
+		/* LCOV_EXCL_START*/
 		if (errno != EXDEV) /* some unrecoverable error occurred */
 			return Err(Error{Error::Code::File, "error moving {} -> {}: {}",
 					src, dst, strerror(errno)});
+		/* LCOV_EXCL_STOP*/
 	}
 
 	/* the EXDEV / assume-remote case -- source and target live on different
@@ -427,7 +413,7 @@ check_determine_target_params (const std::string& old_path,
 
 	if (any_of(newflags & Flags::New) && newflags != Flags::New)
 		return Err(Error{Error::Code::File,
-					"if ::New is specified, it must be the only flag"});
+					"if the New flag is specified, it must be the only flag"});
 	return Ok();
 }
 
@@ -439,6 +425,8 @@ Mu::maildir_determine_target(const std::string&	old_path,
 			     Flags		newflags,
 			     bool		new_name)
 {
+	newflags = flags_mail_dir_file(newflags); // filter out irrelevant flags.
+
 	/* sanity checks */
 	if (const auto checked{check_determine_target_params(
 		old_path, root_maildir_path, target_maildir, newflags)}; !checked)
@@ -462,12 +450,7 @@ Mu::maildir_determine_target(const std::string&	old_path,
 	const auto dst_file{determine_dst_filename(src_file, newflags, new_name)};
 
 	/* and the complete path name. */
-	const auto subdir = std::invoke([&]()->std::string {
-		if (none_of(newflags & Flags::New))
-			return "cur";
-		else
-			return "new";
-	});
+	const std::string subdir{(none_of(newflags & Flags::New)) ? "cur" : "new"};
 
 	return join_paths(dst_mdir, subdir,dst_file);
 }

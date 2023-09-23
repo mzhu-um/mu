@@ -1,4 +1,4 @@
-;;; mu4e-notification.el --- -*- coding: utf-8; lexical-binding: t -*-
+;;; mu4e-notification.el --- Showing mail notifications -*- lexical-binding: t-*-
 ;;
 ;; Copyright (C) 1996-2023 Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
 

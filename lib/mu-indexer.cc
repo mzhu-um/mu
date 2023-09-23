@@ -32,10 +32,13 @@
 #include <chrono>
 using namespace std::chrono_literals;
 
+#include "mu-store.hh"
+
 #include "mu-scanner.hh"
 #include "utils/mu-async-queue.hh"
 #include "utils/mu-error.hh"
-#include "../mu-store.hh"
+
+#include "utils/mu-utils-file.hh"
 
 using namespace Mu;
 
@@ -87,10 +90,11 @@ struct Indexer::Private {
 	      was_empty_{store.empty()} {
 
 		mu_message("created indexer for {} -> "
-			   "{} (batch-size: {}; was-empty: {})",
+			   "{} (batch-size: {}; was-empty: {}; ngrams: {})",
 			   store.root_maildir(), store.path(),
 			   store.config().get<Mu::Config::Id::BatchSize>(),
-			   was_empty_);
+			   was_empty_,
+			   store.config().get<Mu::Config::Id::SupportNgrams>());
 	}
 
 	~Private() {
@@ -107,8 +111,10 @@ struct Indexer::Private {
 	bool add_message(const std::string& path);
 
 	bool cleanup();
-	bool start(const Indexer::Config& conf);
+	bool start(const Indexer::Config& conf, bool block);
 	bool stop();
+
+	bool is_running() const { return state_ != IndexState::Idle; }
 
 	Indexer::Config conf_;
 	Store&          store_;
@@ -238,7 +244,7 @@ Indexer::Private::add_message(const std::string& path)
 	 *
 	 *	std::unique_lock lock{w_lock_};
 	 */
-	auto msg{Message::make_from_path(path)};
+	auto msg{Message::make_from_path(path, store_.message_options())};
 	if (!msg) {
 		mu_warning("failed to create message from {}: {}", path, msg.error().what());
 		return false;
@@ -365,7 +371,7 @@ Indexer::Private::scan_worker()
 }
 
 bool
-Indexer::Private::start(const Indexer::Config& conf)
+Indexer::Private::start(const Indexer::Config& conf, bool block)
 {
 	stop();
 
@@ -394,7 +400,13 @@ Indexer::Private::start(const Indexer::Config& conf)
 	/* kick the disk-scanner thread */
 	scanner_worker_ = std::thread([this] { scan_worker(); });
 
-	mu_debug("started indexer");
+	mu_debug("started indexer in {}-mode", block ? "blocking" : "non-blocking");
+	if (block) {
+		while(is_running()) {
+			using namespace std::chrono_literals;
+			std::this_thread::sleep_for(100ms);
+		}
+	}
 
 	return true;
 }
@@ -424,7 +436,7 @@ Indexer::Indexer(Store& store)
 Indexer::~Indexer() = default;
 
 bool
-Indexer::start(const Indexer::Config& conf)
+Indexer::start(const Indexer::Config& conf, bool block)
 {
 	const auto mdir{priv_->store_.root_maildir()};
 	if (G_UNLIKELY(access(mdir.c_str(), R_OK) != 0)) {
@@ -436,7 +448,7 @@ Indexer::start(const Indexer::Config& conf)
 	if (is_running())
 		return true;
 
-	return priv_->start(conf);
+	return priv_->start(conf, block);
 }
 
 bool
@@ -454,7 +466,7 @@ Indexer::stop()
 bool
 Indexer::is_running() const
 {
-	return priv_->state_ != IndexState::Idle;
+	return priv_->is_running();
 }
 
 const Indexer::Progress&
@@ -470,3 +482,181 @@ Indexer::completed() const
 {
 	return priv_->completed_;
 }
+
+
+#if BUILD_TESTS
+#include "mu-test-utils.hh"
+
+static void
+test_index_basic()
+{
+	allow_warnings();
+
+	TempDir tdir;
+	auto store = Store::make_new(tdir.path(), MU_TESTMAILDIR2);
+	assert_valid_result(store);
+	g_assert_true(store->empty());
+
+	Indexer& idx{store->indexer()};
+
+	g_assert_false(idx.is_running());
+	g_assert_true(idx.stop());
+	g_assert_cmpuint(idx.completed(),==, 0);
+
+	const auto& prog{idx.progress()};
+	g_assert_false(prog.running);
+	g_assert_cmpuint(prog.checked,==, 0);
+	g_assert_cmpuint(prog.updated,==, 0);
+	g_assert_cmpuint(prog.removed,==, 0);
+
+	Indexer::Config conf{};
+	conf.ignore_noupdate = true;
+
+	{
+		const auto start{time({})};
+		g_assert_true(idx.start(conf));
+		while (idx.is_running())
+			g_usleep(10000);
+
+		g_assert_false(idx.is_running());
+		g_assert_true(idx.stop());
+
+		g_assert_cmpuint(idx.completed() - start, <, 5);
+
+		g_assert_false(prog.running);
+		g_assert_cmpuint(prog.checked,==, 14);
+		g_assert_cmpuint(prog.updated,==, 14);
+		g_assert_cmpuint(prog.removed,==, 0);
+
+		g_assert_cmpuint(store->size(),==,14);
+	}
+
+	conf.lazy_check	     = true;
+	conf.max_threads     = 1;
+	conf.ignore_noupdate = false;
+
+	{
+		const auto start{time({})};
+		g_assert_true(idx.start(conf));
+		while (idx.is_running())
+			g_usleep(10000);
+
+		g_assert_false(idx.is_running());
+		g_assert_true(idx.stop());
+
+		g_assert_cmpuint(idx.completed() - start, <, 3);
+
+		g_assert_false(prog.running);
+		g_assert_cmpuint(prog.checked,==, 0);
+		g_assert_cmpuint(prog.updated,==, 0);
+		g_assert_cmpuint(prog.removed,==, 0);
+
+		g_assert_cmpuint(store->size(),==, 14);
+	}
+}
+
+
+static void
+test_index_lazy()
+{
+	allow_warnings();
+
+	TempDir tdir;
+	auto store = Store::make_new(tdir.path(), MU_TESTMAILDIR2);
+	assert_valid_result(store);
+	g_assert_true(store->empty());
+	Indexer& idx{store->indexer()};
+
+	Indexer::Config conf{};
+	conf.lazy_check	     = true;
+	conf.ignore_noupdate = false;
+
+	const auto start{time({})};
+	g_assert_true(idx.start(conf));
+	while (idx.is_running())
+		g_usleep(10000);
+
+	g_assert_false(idx.is_running());
+	g_assert_true(idx.stop());
+
+	g_assert_cmpuint(idx.completed() - start, <, 3);
+
+	const auto& prog{idx.progress()};
+	g_assert_false(prog.running);
+	g_assert_cmpuint(prog.checked,==, 6);
+	g_assert_cmpuint(prog.updated,==, 6);
+	g_assert_cmpuint(prog.removed,==, 0);
+
+	g_assert_cmpuint(store->size(),==, 6);
+}
+
+static void
+test_index_cleanup()
+{
+	allow_warnings();
+
+	TempDir tdir;
+	auto mdir = join_paths(tdir.path(), "Test");
+	{
+		auto res = run_command({"cp", "-r", MU_TESTMAILDIR2, mdir});
+		assert_valid_result(res);
+		g_assert_cmpuint(res->exit_code,==, 0);
+	}
+
+	auto store = Store::make_new(tdir.path(), mdir);
+	assert_valid_result(store);
+	g_assert_true(store->empty());
+	Indexer& idx{store->indexer()};
+
+	Indexer::Config conf{};
+	conf.ignore_noupdate = true;
+
+	g_assert_true(idx.start(conf));
+	while (idx.is_running())
+		g_usleep(10000);
+
+	g_assert_false(idx.is_running());
+	g_assert_true(idx.stop());
+	g_assert_cmpuint(store->size(),==, 14);
+
+	// remove a message
+	{
+		auto mpath = join_paths(mdir, "bar", "cur", "mail6");
+		auto res = run_command({"rm", mpath});
+		assert_valid_result(res);
+		g_assert_cmpuint(res->exit_code,==, 0);
+	}
+
+	// no cleanup, # stays the same
+	conf.cleanup = false;
+	g_assert_true(idx.start(conf));
+	while (idx.is_running())
+		g_usleep(10000);
+	g_assert_false(idx.is_running());
+	g_assert_true(idx.stop());
+	g_assert_cmpuint(store->size(),==, 14);
+
+	// cleanup, message is gone from store.
+	conf.cleanup = true;
+	g_assert_true(idx.start(conf));
+	while (idx.is_running())
+		g_usleep(10000);
+	g_assert_false(idx.is_running());
+	g_assert_true(idx.stop());
+	g_assert_cmpuint(store->size(),==, 13);
+}
+
+
+int
+main(int argc, char* argv[])
+{
+	mu_test_init(&argc, &argv);
+
+	g_test_add_func("/index/basic", test_index_basic);
+	g_test_add_func("/index/lazy", test_index_lazy);
+	g_test_add_func("/index/cleanup", test_index_cleanup);
+
+	return g_test_run();
+
+}
+#endif /*BUILD_TESTS*/
