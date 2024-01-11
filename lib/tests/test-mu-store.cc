@@ -128,14 +128,12 @@ test_store_add_count_remove()
 	const auto msgpath{MuTestMaildir + "/cur/1283599333.1840_11.cthulhu!2,"};
 	const auto id1 = store->add_message(msgpath);
 	assert_valid_result(id1);
-	store->commit();
 
 	g_assert_cmpuint(store->size(), ==, 1);
 	g_assert_true(store->contains_message(msgpath));
 
 	const auto id2 = store->add_message(MuTestMaildir2 + "/bar/cur/mail3");
 	g_assert_false(!!id2); // wrong maildir.
-	store->commit();
 
 	const auto msg3path{MuTestMaildir + "/cur/1252168370_3.14675.cthulhu!2,S"};
 	const auto id3 = store->add_message(msg3path);
@@ -202,7 +200,7 @@ goto * instructions[pOp->opcode];
 	g_assert_cmpuint(store->size(),==, 1);
 
 	/* ensure 'update' dtrt, i.e., nothing. */
-	const auto docid2 = store->add_message(*message, *docid);
+	const auto docid2 = store->add_message(*message);
 	assert_valid_result(docid2);
 	g_assert_cmpuint(store->size(),==, 1);
 	g_assert_cmpuint(*docid,==,*docid2);
@@ -285,7 +283,6 @@ World!
 
 	const auto docid = store->add_message(*message);
 	assert_valid_result(docid);
-	store->commit();
 
 	auto msg2{store->find_message(*docid)};
 	g_assert_true(!!msg2);
@@ -381,7 +378,7 @@ Yes, that would be excellent.
 	 const auto msgs3 = store->move_message(msg->docid(), {}, Flags::Seen);
 	 assert_valid_result(msgs3);
 	 g_assert_true(msgs3->size() == 1);
-	 auto&& msg3_opt{store->find_message(msgs3->at(0))};
+	 auto&& msg3_opt{store->find_message(msgs3->at(0).first/*id*/)};
 	 g_assert_true(!!msg3_opt);
 	 auto&& msg3{std::move(*msg3_opt)};
 
@@ -442,11 +439,11 @@ Yes, that would be excellent.
 	 assert_valid_result(mres);
 	 mu_info("found {} matches", mres->size());
 	 for (auto&& m: *mres)
-		 mu_info("id: {}", m);
+		 mu_info("id: {}: {}", m.first, m.second);
 
 	 // al three dups should have been updated
 	 g_assert_cmpuint(mres->size(), ==, 3);
-	 auto&& id_msgs{store->find_messages(*mres)};
+	 auto&& id_msgs{store->find_messages(Store::id_vec(*mres))};
 
 	 // first should be the  original
 	 g_assert_cmpuint(id_msgs.at(0).first, ==, ids.at(0));
@@ -524,7 +521,32 @@ test_store_maildirs()
 }
 
 
+static void
+test_store_parse()
+{
+	allow_warnings();
 
+	TempDir tdir;
+	auto store = Store::make_new(tdir.path(), MU_TESTMAILDIR2);
+	assert_valid_result(store);
+	g_assert_true(store->empty());
+
+	// Xapian internal format (get_description()) is _not_ guaranteed
+	// to be the same between versions
+	const auto&& pq1{store->parse_query("subject:\"hello world\"", false)};
+	const auto&& pq2{store->parse_query("subject:\"hello world\"", true)};
+
+	assert_equal(pq1, "(or (subject \"hello world\") (subject (phrase \"hello world\")))");
+
+	/* LCOV_EXCL_START*/
+	if (pq2 != "Query((Shello world OR (Shello PHRASE 2 Sworld)))") {
+		g_test_skip("incompatible xapian descriptions");
+		return;
+	}
+	/* LCOV_EXCL_STOP*/
+
+	assert_equal(pq2, "Query((Shello world OR (Shello PHRASE 2 Sworld)))");
+}
 
 static void
 test_store_fail()
@@ -557,6 +579,7 @@ main(int argc, char* argv[])
 	g_test_add_func("/store/move-dups", test_store_move_dups);
 
 	g_test_add_func("/store/maildirs", test_store_maildirs);
+	g_test_add_func("/store/parse", test_store_parse);
 
 	g_test_add_func("/store/index/index-move", test_index_move);
 	g_test_add_func("/store/index/circular-symlink", test_store_circular_symlink);

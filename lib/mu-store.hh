@@ -47,6 +47,8 @@ public:
 	using Id                      = Xapian::docid;   /**< Id for a message in the store */
 	static constexpr Id InvalidId = 0;               /**< Invalid  store id */
 	using IdVec                   = std::vector<Id>; /**< Vector of document ids */
+	using IdPathVec               = std::vector<std::pair<Id, std::string>>;
+	/**< vector of id, path pairs */
 
 	/**
 	 * Configuration options.
@@ -191,7 +193,7 @@ public:
 	/**
 	 * Add or update a message to the store. When planning to write many
 	 * messages, it's much faster to do so in a transaction. If so, set
-	 * @in_transaction to true. When done with adding messages, call
+	 * @param in_transaction to true. When done with adding messages, call
 	 * commit().
 	 *
 	 * Optimization: If you are sure the message (i.e., a message with the
@@ -200,16 +202,12 @@ public:
 	 * have to check for the existing message.
 	 *
 	 * @param msg a message
-	 * @param use_transaction whether to bundle up to batch_size
-	 * changes in a transaction
 	 * @param is_new whether this is a completely new message
 	 *
 	 * @return the doc id of the added message or an error.
 	 */
-	Result<Id> add_message(Message& msg, bool use_transaction = false,
-			       bool is_new = false);
-	Result<Id> add_message(const std::string& path, bool use_transaction = false,
-			       bool is_new = false);
+	Result<Id> add_message(Message& msg, bool is_new = false);
+	Result<Id> add_message(const std::string& path, bool is_new = false);
 
 	/**
 	 * Remove a message from the store. It will _not_ remove the message
@@ -247,6 +245,15 @@ public:
 	Option<Message> find_message(Id id) const;
 
 	/**
+	 * Find a message's docid based on its path
+	 *
+	 * @param path path to the message
+	 *
+	 * @return the docid or Nothing if not found
+	 */
+	Option<Id> find_message_id(const std::string& path) const;
+
+	/**
 	 * Find the messages for the given ids
 	 *
 	 * @param ids document ids for the message
@@ -282,27 +289,38 @@ public:
 	enum struct MoveOptions {
 		None	     = 0,	/**< Defaults */
 		ChangeName   = 1 << 0,	/**< Change the name when moving */
-		DupFlags     = 1 << 1,  /**< Update flags for duplicate messages too*/
+		DupFlags     = 1 << 1,  /**< Update flags for duplicate messages too */
+		DryRun       = 1 << 2,  /**< Don't really move, just determine target paths */
 	};
 
 	/**
-	 * Move a message both in the filesystem and in the store. After a
-	 * successful move, the message is updated.
+	 * Move a message both in the filesystem and in the store. After a successful move, the
+	 * message is updated.
 	 *
 	 * @param id the id for some message
 	 * @param target_mdir the target maildir (if any)
 	 * @param new_flags new flags (if any)
-	 * @param change_name whether to change the name
+	 * @param opts move options
 	 *
-	 * @return Result, either an IdVec with ids for the  moved
-	 * message(s) or some error. Note that in case of success at least one
-	 * message is returned, and only with MoveOptions::DupFlags can it be
-	 * more than one.
+	 * @return Result, either an IdPathVec with ids and paths for the moved message(s) or some
+	 * error. Note that in case of success at least one message is returned, and only with
+	 * MoveOptions::DupFlags can it be more than one.
+	 *
+	 * The first element of the IdPathVec, is the main message that got move; any subsequent
+	 * (if any) are the duplicate paths, sorted by path-name.
 	 */
-	Result<IdVec> move_message(Store::Id id,
-				   Option<const std::string&> target_mdir = Nothing,
-				   Option<Flags> new_flags = Nothing,
-				   MoveOptions opts = MoveOptions::None);
+	Result<IdPathVec> move_message(Store::Id id,
+				       Option<const std::string&> target_mdir = Nothing,
+				       Option<Flags> new_flags = Nothing,
+				       MoveOptions opts = MoveOptions::None);
+	/**
+	 * Convert IdPathVec -> IdVec
+	 *
+	 * @param ips idpath vector
+	 *
+	 * @return vector of ids
+	 */
+	static IdVec id_vec(const IdPathVec& ips);
 
 	/**
 	 * Prototype for the ForEachMessageFunc
@@ -370,12 +388,6 @@ public:
 	 * @param tstamp the timestamp for that path
 	 */
 	void set_dirstamp(const std::string& path, time_t tstamp);
-
-	/**
-	 * Commit the current batch of modifications to disk, opportunistically.
-	 * If no transaction is underway, do nothing.
-	 */
-	void commit();
 
 	/*
 	 *

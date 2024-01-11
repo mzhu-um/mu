@@ -98,6 +98,8 @@ test_maildir_mkdir_03()
 static void
 test_maildir_mkdir_04()
 {
+	allow_warnings();
+
 	if (geteuid() == 0) {
 		g_test_skip("not useful when run as root");
 		return;
@@ -469,6 +471,8 @@ test_maildir_link()
 	g_assert_true(g_access(dstpath1.c_str(), F_OK) == 0);
 	g_assert_true(g_access(dstpath2.c_str(), F_OK) == 0);
 
+	g_assert_false(!!maildir_clear_links("/nonexistent/bla/foo/xuux"));
+
 	assert_valid_result(maildir_clear_links(tmpdir.path() + "/bar"));
 	g_assert_false(g_access(dstpath1.c_str(), F_OK) == 0);
 	g_assert_false(g_access(dstpath2.c_str(), F_OK) == 0);
@@ -476,15 +480,15 @@ test_maildir_link()
 
 
 static void
-test_maildir_move(bool use_gio)
+test_maildir_move(bool assume_remote)
 {
 	TempDir tmpdir;
 
 	assert_valid_result(maildir_mkdir(tmpdir.path() + "/foo"));
 	assert_valid_result(maildir_mkdir(tmpdir.path() + "/bar"));
 
-	const auto srcpath1 = tmpdir.path() + "/foo/cur/msg1";
-	const auto srcpath2 = tmpdir.path() + "/foo/new/msg2";
+	const auto srcpath1{join_paths(tmpdir.path(), "/foo/cur/msg1")};
+	const auto srcpath2{join_paths(tmpdir.path(), "/foo/new/msg2")};
 
 	{
 		std::ofstream stream(srcpath1);
@@ -502,23 +506,22 @@ test_maildir_move(bool use_gio)
 
 	const auto dstpath = tmpdir.path() + "/test1";
 
-	assert_valid_result(maildir_move_message(srcpath1, dstpath, use_gio));
-	assert_valid_result(maildir_move_message(srcpath2, dstpath, use_gio));
+	assert_valid_result(maildir_move_message(srcpath1, dstpath, assume_remote));
+	assert_valid_result(maildir_move_message(srcpath2, dstpath, assume_remote));
 
-
-	//g_assert_true(g_access(dstpath.c_str(), F_OK) == 0);
+	assert_valid_result(maildir_move_message(dstpath, dstpath)); // self-move is okay.
 }
 
 static void
 test_maildir_move_vanilla()
 {
-	test_maildir_move(false/*!gio*/);
+	test_maildir_move(false/*!assume_remote*/);
 }
 
 static void
-test_maildir_move_gio()
+test_maildir_move_remote()
 {
-	test_maildir_move(true/*gio*/);
+	test_maildir_move(true/*assume_remote*/);
 }
 
 
@@ -548,7 +551,7 @@ main(int argc, char* argv[])
 
 	g_test_add_func("/maildir/link", test_maildir_link);
 	g_test_add_func("/maildir/move-vanilla", test_maildir_move_vanilla);
-	g_test_add_func("/maildir/aildir-move-gio", test_maildir_move_gio);
+	g_test_add_func("/maildir/move-remote", test_maildir_move_remote);
 
 	return g_test_run();
 }

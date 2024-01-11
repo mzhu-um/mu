@@ -184,17 +184,19 @@ options_map(const IE& ie)
 	return map;
 }
 
-
-
 // transformers
-
 
 // Expand the path using wordexp
 static const std::function ExpandPath = [](std::string filepath)->std::string {
 	if (auto&& res{expand_path(filepath)}; !res)
 		throw CLI::ValidationError{res.error().what()};
 	else
-		return filepath = std::move(res.value());
+		return res.value();
+};
+
+// Canonicalize path
+static const std::function CanonicalizePath = [](std::string filepath)->std::string {
+	return filepath = canonicalize_filename(filepath);
 };
 
 /*
@@ -283,7 +285,7 @@ sub_extract(CLI::App& sub, Options& opts)
 	sub.add_option("--target-dir", opts.extract.targetdir,
 		       "Target directory for saving")
 		->type_name("<dir>")
-		->transform(ExpandPath, "expand path")
+		->transform(ExpandPath, "expand target path")
 		->default_str("<current>")
 		->default_val(".");
 	sub.add_flag("--uncooked,-u", opts.extract.uncooked,
@@ -397,7 +399,7 @@ sub_find(CLI::App& sub, Options& opts)
 	sub.add_option("--linksdir", opts.find.linksdir,
 		       "Use bookmarked query")
 		->type_name("<dir>")
-		->transform(ExpandPath, "expand path");
+		->transform(ExpandPath, "expand linksdir path");
 
 	sub.add_option("--summary-len", opts.find.summary_len,
 		       "Use up to so many lines for the summary")
@@ -442,10 +444,20 @@ sub_info(CLI::App& sub, Options& opts)
 static void
 sub_init(CLI::App& sub, Options& opts)
 {
-	sub.add_option("--maildir,-m", opts.init.maildir,
-		       "Top of the maildir")
+	const auto default_mdir = std::invoke([]()->std::string {
+		if (const auto mdir_env{::getenv("MAILDIR")}; mdir_env)
+			return mdir_env;
+		else if (const auto mdir_home = ::join_paths(g_get_home_dir(), "Maildir");
+			 check_dir(mdir_home))
+			return mdir_home;
+		else
+			return {};
+	});
+
+	sub.add_option("--maildir,-m", opts.init.maildir, "Top of the maildir")
 		->type_name("<maildir>")
-		->transform(ExpandPath, "expand path");
+		->default_val(default_mdir)
+		->transform(ExpandPath, "expand maildir path");
 	sub.add_option("--my-address", opts.init.my_addresses,
 		       "Personal e-mail address or regexp")
 		->type_name("<address>");
@@ -480,6 +492,31 @@ sub_mkdir(CLI::App& sub, Options& opts)
 		->type_name("<dir>")
 		->required();
 }
+
+
+static void
+sub_move(CLI::App& sub, Options& opts)
+{
+	sub.add_flag("--change-name", opts.move.change_name,
+		     "Change name of target file");
+	sub.add_flag("--update-dups", opts.move.update_dups,
+		     "Update duplicate messages too");
+	sub.add_flag("--dry-run,-n", opts.move.dry_run,
+		     "Print target name, but do not change anything");
+
+	sub.add_option("--flags", opts.move.flags, "Target flags")
+		->type_name("<flags>");
+
+	sub.add_option("source", opts.move.src, "Message file to move")
+		->type_name("<message-path>")
+		->transform(ExpandPath, "expand source path")
+		->transform(CanonicalizePath, "canonicalize source path")
+		->required();
+	sub.add_option("destination", opts.move.dest,
+		       "Destination maildir")
+		->type_name("<maildir>");
+}
+
 
 static void
 sub_remove(CLI::App& sub, Options& opts)
@@ -602,7 +639,7 @@ AssocPairs<SubCommand, CommandInfo, Options::SubCommandNum> SubCommandInfos= {{
 		},
 		{ SubCommand::Info,
 		  {Category::NeedsReadOnlyStore,
-		  "info", "Show information about the message store database", sub_info }
+		  "info", "Show information", sub_info }
 		},
 		{ SubCommand::Init,
 		  {Category::NeedsWritableStore,
@@ -611,6 +648,10 @@ AssocPairs<SubCommand, CommandInfo, Options::SubCommandNum> SubCommandInfos= {{
 		{ SubCommand::Mkdir,
 		  {Category::None,
 		  "mkdir", "Create a new Maildir", sub_mkdir }
+		},
+		{ SubCommand::Move,
+		  {Category::NeedsWritableStore,
+		   "move", "Move a message or change flags", sub_move }
 		},
 		{ SubCommand::Remove,
 		  {Category::NeedsWritableStore,
@@ -718,7 +759,8 @@ add_global_options(CLI::App& cli, Options& opts)
 
 	cli.add_flag("-q,--quiet", opts.quiet, "Hide non-essential output");
 	cli.add_flag("-v,--verbose", opts.verbose, "Show verbose output");
-	cli.add_flag("--log-stderr", opts.log_stderr, "Log to stderr");
+	cli.add_flag("--log-stderr", opts.log_stderr, "Log to stderr")
+		->group(""/*always hide*/);
 	cli.add_flag("--nocolor", opts.nocolor, "Don't show ANSI colors")
 		->default_val(Options::default_no_color())
 		->default_str(Options::default_no_color() ? "<true>" : "<false>");
@@ -777,10 +819,10 @@ There is NO WARRANTY, to the extent permitted by law.
 					opts.muhome, "Specify alternative mu directory")
 				->envname("MUHOME")
 				->type_name("<dir>")
-				->transform(ExpandPath, "expand path");
+				->transform(ExpandPath, "expand muhome path");
 	}
 
-	/* add scripts (if supported) as semi-subscommands as well */
+	/* add scripts (if supported) as semi-subcommands as well */
 	const auto scripts = add_scripts(app, opts);
 
 	try {
@@ -842,6 +884,11 @@ Options::category(Options::SubCommand sub)
 static constexpr bool
 validate_subcommand_ids()
 {
+	size_t val{};
+	for (auto& cmd: Options::SubCommands)
+		if (static_cast<size_t>(cmd) != val++)
+			return false;
+
 	for (auto u = 0U; u != SubCommandInfos.size(); ++u)
 		if (static_cast<size_t>(SubCommandInfos.at(u).first) != u)
 			return false;

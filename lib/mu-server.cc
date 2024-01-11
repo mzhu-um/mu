@@ -102,7 +102,6 @@ struct OutputStream {
 			quote(fname_);
 	}
 
-
 	/**
 	 * Delete file, if any. Only do this when the OutputStream is no
 	 * longer needed.
@@ -112,6 +111,8 @@ struct OutputStream {
 			return;
 		if (auto&&res{::unlink(fname_.c_str())}; res != 0)
 			mu_warning("failed to unlink '{}'", ::strerror(res));
+		else
+			mu_debug("unlinked output-stream {}", fname_);
 	}
 
 private:
@@ -299,21 +300,6 @@ Server::Private::make_command_map()
 		ArgMap{{":path", ArgInfo{Type::String, true, "file system path to the message"}}},
 		"add a message to the store",
 		[&](const auto& params) { add_handler(params); }});
-
-	cmap.emplace(
-	    "compose",
-	    CommandInfo{
-		ArgMap{
-		    {":type",
-		     ArgInfo{Type::Symbol,
-			     true,
-			     "type of composition: reply/forward/edit/resend/new"}},
-		    {":docid",
-		     ArgInfo{Type::Number, false, "document id of parent-message, if any"}},
-		    {":decrypt",
-		     ArgInfo{Type::Symbol, false, "whether to decrypt encrypted parts (if any)"}}},
-		"compose a new message",
-		[&](const auto& params) { compose_handler(params); }});
 
 	cmap.emplace(
 	    "contacts",
@@ -523,90 +509,6 @@ Server::Private::add_handler(const Command& cmd)
 			 msg_sexp_str(msg_res.value(), docid, {})));
 }
 
-/* 'compose' produces the un-changed *original* message sexp (ie., the message
- * to reply to, forward or edit) for a new message to compose). It takes two
- * parameters: 'type' with the compose type (either reply, forward or
- * edit/resend), and 'docid' for the message to reply to. Note, type:new does
- * not have an original message, and therefore does not need a docid
- *
- * In returns a (:compose <type> [:original <original-msg>] [:include] ) message
- * (details: see code below)
- *
- * Note ':include' t or nil determines whether to include attachments
- */
-
-static Option<Sexp>
-maybe_add_attachment(Message& message, const MessagePart& part, size_t index)
-{
-	if (!part.is_attachment())
-		return Nothing;
-
-	const auto cache_path{message.cache_path(index)};
-	if (!cache_path)
-		throw cache_path.error();
-
-	const auto cooked_name{part.cooked_filename()};
-	const auto fname{join_paths(*cache_path, cooked_name.value_or("part"))};
-
-	const auto res = part.to_file(fname, true);
-	if (!res)
-		throw res.error();
-
-	Sexp pi;
-	if (auto cdescr = part.content_description(); cdescr)
-		pi.put_props(":description", *cdescr);
-	else if (cooked_name)
-		pi.put_props(":description", cooked_name.value());
-
-	pi.put_props(":file-name", fname,
-		     ":mime-type",
-		     part.mime_type().value_or("application/octet-stream"));
-
-	return Some(std::move(pi));
-}
-
-
-void
-Server::Private::compose_handler(const Command& cmd)
-{
-	const auto ctype = cmd.symbol_arg(":type").value_or("<error>");
-
-	auto comp_lst = Sexp().put_props(":compose", Sexp::Symbol(ctype));
-
-
-	if (ctype == "reply" || ctype == "forward" ||
-	    ctype == "edit" || ctype == "resend") {
-
-		const unsigned docid{static_cast<unsigned>(cmd.number_arg(":docid").value_or(0))};
-		auto  msg{store().find_message(docid)};
-		if (!msg)
-			throw Error{Error::Code::Store, "failed to get message {}", docid};
-
-		auto msg_sexp = unwrap(Sexp::parse(msg_sexp_str(msg.value(), docid, {})));
-		comp_lst.put_props(":original", msg_sexp);
-		if (ctype == "forward") {
-			// when forwarding, attach any attachment in the orig
-			size_t index{};
-			Sexp attseq;
-			for (auto&& part: msg->parts()) {
-				if (auto attsexp = maybe_add_attachment(
-					    *msg, part, index); attsexp) {
-					attseq.add(std::move(*attsexp));
-					++index;
-				}
-			}
-			if (!attseq.empty()) {
-				comp_lst.put_props(":include", std::move(attseq),
-						  ":cache-path", *msg->cache_path());
-			}
-		}
-
-	} else if (ctype != "new")
-		throw Error(Error::Code::InvalidArgument, "invalid compose type '{}'", ctype);
-
-	output_sexp(comp_lst);
-}
-
 void
 Server::Private::contacts_handler(const Command& cmd)
 {
@@ -785,6 +687,8 @@ Server::Private::find_handler(const Command& cmd)
 	StopWatch sw{mu_format("{} (indexing: {})", __func__,
 			       indexer().is_running() ? "yes" :  "no")};
 
+	// we need to _lock_ the store while querying (which likely consists of
+	// multiple actual queries) + grabbing the results.
 	std::lock_guard l{store_.lock()};
 	auto qres{store_.run_query(q, sort_field_id, qflags, maxnum)};
 	if (!qres)
@@ -845,7 +749,6 @@ static Sexp
 get_stats(const Indexer::Progress& stats, const std::string& state)
 {
 	Sexp sexp;
-
 	sexp.put_props(
 		":info", "index"_sym,
 		":status", Sexp::Symbol(state),
@@ -880,7 +783,6 @@ Server::Private::index_handler(const Command& cmd)
 		}
 		output_sexp(get_stats(indexer().progress(), "complete"),
 			    Server::OutputFlags::Flush);
-		store().commit(); /* ensure on-disk database is updated, too */
 	});
 }
 
@@ -928,12 +830,11 @@ Server::Private::perform_move(Store::Id                 docid,
 
 	/* note: we get back _all_ the messages that changed; the first is the
 	 * primary mover; the rest (if present) are any dups affected */
-	const auto ids{unwrap(store().move_message(docid, maildir, flags, move_opts))};
-
-	for (auto&& id: ids) {
+	const auto id_paths{unwrap(store().move_message(docid, maildir, flags, move_opts))};
+	for (auto& [id,path]: id_paths) {
 		auto idmsg{store().find_message(id)};
 		if (!idmsg)
-			mu_warning("failed to find message for id {}", id);
+			throw Error{Error::Code::Xapian, "cannot find message for id {}", id};
 
 		auto sexpstr = "(:update " + msg_sexp_str(*idmsg, id, {});
 		/* note, the :move t thing is a hint to the frontend that it
@@ -1081,10 +982,12 @@ Server::Private::remove_handler(const Command& cmd)
 
 		if (::unlink(path.c_str()) != 0 && errno != ENOENT)
 			throw Error(Error::Code::File,
-				    "could not delete {}: {}", path, g_strerror(errno));
+			"could not delete {}: {}", path, g_strerror(errno));
 
 		if (!store().remove_message(path))
 			mu_warning("failed to remove message @ {} ({}) from store", path, docid);
+		else
+			mu_debug("removed message @ {} @ ({})", path, docid);
 		output_sexp(Sexp().put_props(":remove", docid));	// act as if it worked.
 	}
 }
@@ -1122,15 +1025,14 @@ Server::Private::view_mark_as_read(Store::Id docid, Message&& msg, bool rename)
 	}
 
 	// move message + dups, present results.
-
 	Store::MoveOptions move_opts{Store::MoveOptions::DupFlags};
 	if (rename)
 		move_opts |= Store::MoveOptions::ChangeName;
-	auto&& ids = unwrap(store().move_message(docid, {}, nflags, move_opts));
-	for (auto&& [id, moved_msg]: store().find_messages(ids)) {
+
+	const auto ids{Store::id_vec(unwrap(store().move_message(docid, {}, nflags, move_opts)))};
+	for (auto&& [id, moved_msg]: store().find_messages(ids))
 		output(mu_format("({} {})", id == docid ? ":view" : ":update",
 				 msg_sexp_str(moved_msg, id, {})));
-	}
 }
 
 void

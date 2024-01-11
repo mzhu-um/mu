@@ -147,6 +147,7 @@ Then, display the results."
        (with-selected-window (or (get-buffer-window buffer)
                                  (get-buffer-window))
          (with-current-buffer buffer
+           (mu4e-thread-unfold-all)
            (if (or (mu4e~headers-goto-docid docid)
                    ;; TODO: Is this the best way to find another
                    ;; relevant docid for a view buffer?
@@ -636,6 +637,9 @@ As a side-effect, a message that is being viewed loses its
         (erase-buffer)
         (insert-file-contents-literally
          (mu4e-message-readable-path msg) nil nil nil t)
+        ;; some messages have ^M which causes various rendering
+        ;; problems later (#2260, #2508), so let's remove those
+        (article-remove-cr)
         (setq-local mu4e--view-message msg)
         (mu4e--view-render-buffer msg)
         (setq-local mu4e--view-mime-part-cached nil))
@@ -658,16 +662,15 @@ As a side-effect, a message that is being viewed loses its
       (run-hooks 'mu4e-view-rendered-hook))))
 
 (defun mu4e-view-message-text (msg)
-  "Return the pristine MSG as a string."
-  ;; we need this for replying/forwarding, since the mu4e-compose
-  ;; wants it that way.
+  "Return the rendered MSG as a string."
   (with-temp-buffer
     (insert-file-contents-literally
      (mu4e-message-readable-path msg) nil nil nil t)
     (let ((gnus-inhibit-mime-unbuttonizing nil)
-          (gnus-unbuttonized-mime-types '(".*/.*")))
-      (mu4e--view-render-buffer msg))
-    (buffer-substring-no-properties (point-min) (point-max))))
+          (gnus-unbuttonized-mime-types '(".*/.*"))
+          (mu4e-view-fields '(:from :to :cc :subject :date)))
+      (mu4e--view-render-buffer msg)
+      (buffer-substring-no-properties (point-min) (point-max)))))
 
 (defun mu4e-action-view-in-browser (msg &optional skip-headers)
   "Show current MSG in browser if it includes an HTML-part.
@@ -678,7 +681,8 @@ determine which browser function to use."
   (with-temp-buffer
     (insert-file-contents-literally
      (mu4e-message-readable-path msg) nil nil nil t)
-    (run-hooks 'gnus-article-decode-hook)
+    ;; just continue if some of the decoding fails.
+    (ignore-errors (run-hooks 'gnus-article-decode-hook))
     (let ((header (unless skip-headers
                     (cl-loop for field in '("from" "to" "cc" "date" "subject")
                              when (message-fetch-field field)
@@ -719,13 +723,12 @@ determine which browser function to use."
           (if (and charset (coding-system-p charset)) charset
             (detect-coding-region (point-min) (point-max) t)))
          ;; Possibly add headers (before "Attachments")
-         (gnus-display-mime-function (mu4e--view-gnus-display-mime msg))
-         (gnus-icalendar-additional-identities
-          (mu4e-personal-addresses 'no-regexp)))
+         (gnus-display-mime-function (mu4e--view-gnus-display-mime msg)))
     (condition-case err
         (progn
           (mm-enable-multibyte)
-          (run-hooks 'gnus-article-decode-hook)
+          ;; just continue if some of the decoding fails.
+          (ignore-errors (run-hooks 'gnus-article-decode-hook))
           (gnus-article-prepare-display)
           (mu4e--view-activate-urls)
           (setq mu4e~gnus-article-mime-handles gnus-article-mime-handles
@@ -766,7 +769,7 @@ Note that for some messages, this can trigger high CPU load."
   (mu4e-view-refresh))
 
 (defun mu4e--view-gnus-display-mime (msg)
-  "Like `gnus-display-mime' but include mu4e headers to MSG."
+  "Like `gnus-display-mime', but include mu4e headers to MSG."
   (lambda (&optional ihandles)
     (gnus-display-mime ihandles)
     (unless ihandles
@@ -777,8 +780,11 @@ Note that for some messages, this can trigger high CPU load."
         (dolist (field mu4e-view-fields)
           (let ((fieldval (mu4e-message-field msg field)))
             (pcase field
-              ((or ':path ':maildir :list ':user-agent ':message-id)
+              ((or ':path ':maildir ':list)
                (mu4e--view-gnus-insert-header field fieldval))
+              (':message-id
+               (when-let ((msgid (plist-get msg :message-id)))
+                 (mu4e--view-gnus-insert-header field (format "<%s>" msgid))))
               (':mailing-list
                (let ((list (plist-get msg :list)))
                  (if list (mu4e-get-mailing-list-shortname list) "")))
@@ -791,8 +797,8 @@ Note that for some messages, this can trigger high CPU load."
               (':size (mu4e--view-gnus-insert-header
                        field (mu4e-display-size fieldval)))
               ((or ':subject ':to ':from ':cc ':bcc ':from-or-to
-                   ':date :attachments ':signature
-                   ':decryption))       ; handled by Gnus
+                   ':user-agent ':date ':attachments
+                   ':signature ':decryption)) ;; handled by Gnus
               (_
                (mu4e--view-gnus-insert-header-custom msg field)))))
         (let ((gnus-treatment-function-alist
@@ -863,7 +869,7 @@ This is useful for advising some Gnus-functionality that does not work in mu4e."
 (defun mu4e--view-msg-mail (func &rest args)
   "Advise FUNC with ARGS  to make `gnus-msg-mail' links compose with mu4e."
   (if (mu4e--view-mode-p)
-      (apply 'mu4e~compose-mail args)
+      (apply 'mu4e-compose-mail args)
     (apply func args)))
 
 (defun mu4e-view-quit ()
@@ -902,11 +908,6 @@ This is useful for advising some Gnus-functionality that does not work in mu4e."
     (define-key map "g" #'mu4e-view-go-to-url)
     (define-key map "k" #'mu4e-view-save-url)
     (define-key map "f" #'mu4e-view-fetch-url)
-
-    (define-key map "F" #'mu4e-compose-forward)
-    (define-key map "R" #'mu4e-compose-reply)
-    (define-key map "C" #'mu4e-compose-new)
-    (define-key map "E" #'mu4e-compose-edit)
 
     (define-key map "." #'mu4e-view-raw-message)
     (define-key map "," #'mu4e-sexp-at-point)
@@ -1050,6 +1051,9 @@ This is useful for advising some Gnus-functionality that does not work in mu4e."
 (define-derived-mode mu4e-view-mode gnus-article-mode "mu4e:view"
   "Major mode for viewing an e-mail message in mu4e.
 Based on Gnus' article-mode."
+  ;; some external tools (bbdb) depend on this
+  (setq gnus-article-buffer (current-buffer))
+
   ;; ;; turn off gnus modeline changes and menu items
   (advice-add 'gnus-set-mode-line :around #'mu4e--view-nop)
   (advice-add 'gnus-button-reply :around #'mu4e--view-button-reply)
@@ -1065,6 +1069,7 @@ Based on Gnus' article-mode."
   (use-local-map mu4e-view-mode-map)
   (mu4e-context-minor-mode)
   (mu4e-search-minor-mode)
+  (mu4e-compose-minor-mode)
   (setq buffer-undo-list t) ;; don't record undo info
 
   ;; support bookmarks.

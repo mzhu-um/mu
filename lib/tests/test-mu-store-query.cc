@@ -71,13 +71,7 @@ make_test_store(const std::string& test_path, const TestMap& test_map,
 	assert_valid_result(store);
 
 	/* index the messages */
-	auto res = store->indexer().start({});
-	g_assert_true(res);
-	while(store->indexer().is_running()) {
-		using namespace std::chrono_literals;
-		std::this_thread::sleep_for(100ms);
-	}
-
+	g_assert_true(store->indexer().start({},true/*block*/));
 	if (test_map.size() > 0)
 		g_assert_false(store->empty());
 
@@ -131,7 +125,6 @@ I said: "Aujourd'hui!"
 }};
 	TempDir tdir;
 	auto store{make_test_store(tdir.path(), test_msgs, {})};
-	store.commit();
 
 	// matches
 	for (auto&& expr: {
@@ -575,7 +568,7 @@ Boo!
 	assert_valid_result(moved_msgs);
 
 	g_assert_true(moved_msgs->size() == 1);
-	auto&& moved_msg_opt = store.find_message(moved_msgs->at(0));
+	auto&& moved_msg_opt = store.find_message(moved_msgs->at(0).first);
 	g_assert_true(!!moved_msg_opt);
 	const auto&moved_msg = std::move(*moved_msg_opt);
 	const auto new_path = moved_msg.path();
@@ -657,7 +650,7 @@ Boo!
 	TempDir tdir;
 	auto store{make_test_store(tdir.path(), test_msgs, {})};
 	/* true: match; false: no match */
-	const auto cases = std::array<std::pair<const char*, bool>, 7>{{
+	const auto cases = std::array<std::pair<const char*, bool>, 8>{{
 		{"subject:foo's", true},
 		{"subject:foo*", true},
 		{"subject:/foo/", true},
@@ -665,6 +658,7 @@ Boo!
 		{"subject:/foo.*bar/", true},  /* <-- breaks before PR #2365 */
 		{"subject:/foo’s bar/", false}, /* <-- no matching, needs quoting */
 		{"subject:\"/foo’s bar/\"", true}, /* <-- this works, quote the regex */
+		{R"(subject:"/foo’s bar/")", true}, /* <-- this works, quote the regex */
 	}};
 
 	for (auto&& test: cases) {
@@ -851,7 +845,6 @@ https://trac.xapian.org/ticket/719
 
 	TempDir tdir;
 	auto store{make_test_store(tdir.path(), test_msgs, conf)};
-	store.commit();
 
 	/* true: match; false: no match */
 	const auto cases = std::vector<std::pair<std::string_view, bool>>{{

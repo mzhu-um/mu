@@ -61,13 +61,15 @@
 Then, show the main window, unless BACKGROUND (prefix-argument)
 is non-nil."
   (interactive "P")
-  (if (and (not background) (buffer-live-p mu4e-main-buffer-name))
-      ;; already running.
-      (switch-to-buffer mu4e-main-buffer-name)
-    ;; start mu4e, then show the main view
-    (mu4e--init-handlers)
-    (mu4e--start
-     (unless background #'mu4e--main-view))))
+  (if (not (mu4e-running-p))
+      (progn
+        (mu4e--init-handlers)
+        (mu4e--start (unless background #'mu4e--main-view)))
+    ;; mu4e already running; show unless BACKGROUND
+    (unless background
+      (if (buffer-live-p (get-buffer mu4e-main-buffer-name))
+          (switch-to-buffer mu4e-main-buffer-name)
+        (mu4e--main-view)))))
 
 (defun mu4e-quit(&optional bury)
   "Quit the mu4e session or bury the buffer.
@@ -253,7 +255,6 @@ chance."
   (mu4e-setq-if-nil mu4e-erase-func            #'mu4e~headers-clear)
 
   (mu4e-setq-if-nil mu4e-sent-func             #'mu4e--default-handler)
-  (mu4e-setq-if-nil mu4e-compose-func          #'mu4e~compose-handler)
   (mu4e-setq-if-nil mu4e-contacts-func         #'mu4e--update-contacts)
   (mu4e-setq-if-nil mu4e-info-func             #'mu4e--info-handler)
   (mu4e-setq-if-nil mu4e-pong-func             #'mu4e--default-handler)

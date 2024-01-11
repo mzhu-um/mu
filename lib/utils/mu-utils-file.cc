@@ -158,10 +158,13 @@ Mu::runtime_path(Mu::RuntimePath path, const std::string& muhome)
 		return mu_config;
 	case Mu::RuntimePath::Scripts:
 		return join_paths(mu_config, "scripts");
+		/*LCOV_EXCL_START*/
 	default:
 		throw std::logic_error("unknown path");
+		/*LCOV_EXCL_STOP*/
 	}
 }
+
 /* LCOV_EXCL_START*/
 static gpointer
 cancel_wait(gpointer data)
@@ -212,6 +215,7 @@ Mu::g_cancellable_new_with_timeout(guint timeout)
 }
 /* LCOV_EXCL_STOP*/
 
+/* LCOV_EXCL_START*/
 Result<std::string>
 Mu::read_from_stdin()
 {
@@ -234,13 +238,14 @@ Mu::read_from_stdin()
 							 G_MEMORY_OUTPUT_STREAM(outmem))),
 			g_memory_output_stream_get_size(G_MEMORY_OUTPUT_STREAM(outmem))});
 }
-
+/* LCOV_EXCL_STOP*/
 
 
 /*
  * Set the child to a group leader to avoid being killed when the
  * parent group is killed.
  */
+/*LCOV_EXCL_START*/
 static void
 maybe_setsid (G_GNUC_UNUSED gpointer user_data)
 {
@@ -248,6 +253,7 @@ maybe_setsid (G_GNUC_UNUSED gpointer user_data)
 	setsid();
 #endif /*HAVE_SETSID*/
 }
+/*LCOV_EXCL_STOP*/
 
 Result<Mu::CommandOutput>
 Mu::run_command(std::initializer_list<std::string> args, bool try_setsid)
@@ -292,7 +298,11 @@ Mu::run_command0(std::initializer_list<std::string> args, bool try_setsid)
 	if (auto&& res{run_command(args, try_setsid)}; !res)
 		return res;
 	else if (res->exit_code != 0)
-		return Err(Error::Code::File, "command ran with non-zero exit code");
+		return Err(Error::Code::File, "command returned {}: {}",
+			   res->exit_code,
+			   res->standard_err.empty() ?
+			   std::string{"something went wrong"}:
+			   res->standard_err);
 	else
 		return Ok(std::move(*res));
 }
@@ -342,18 +352,21 @@ Mu::play (const std::string& path)
 
 
 Result<std::string>
-Mu::expand_path(const std::string& str)
+expand_path_real(const std::string& str)
 {
 #ifndef HAVE_WORDEXP_H
 	return Ok(std::string{str});
 #else
 	int res;
-	wordexp_t result;
-	memset(&result, 0, sizeof(result));
+	wordexp_t result{};
 
 	res = wordexp(str.c_str(), &result, 0);
-	if (res != 0 || result.we_wordc == 0)
-		return Err(Error::Code::File, "cannot expand '%s'; err=%d", str.c_str(), res);
+	if (res != 0)
+		return Err(Error::Code::File, "cannot expand {}; err={}", str, res);
+	else if (auto&n = result.we_wordc; n != 1) {
+		wordfree(&result);
+		return Err(Error::Code::File, "expected 1 expansions, but got {} for {}", n, str);
+	}
 
 	std::string expanded{result.we_wordv[0]};
 	wordfree(&result);
@@ -361,6 +374,18 @@ Mu::expand_path(const std::string& str)
 	return Ok(std::move(expanded));
 
 #endif /*HAVE_WORDEXP_H*/
+}
+
+
+Result<std::string>
+Mu::expand_path(const std::string& str)
+{
+	if (auto&& res{expand_path_real(str)}; res)
+		return res;
+
+	// failed... try quoting.
+	auto qstr{to_string_gchar(g_shell_quote(str.c_str()))};
+	return expand_path_real(qstr);
 }
 
 
@@ -451,7 +476,20 @@ test_join_paths()
 	assert_equal(join_paths("/a/b///c/d//", "e"), "/a/b/c/d/e");
 }
 
+static void
+test_runtime_paths()
+{
+	TempDir tdir;
 
+	assert_equal(runtime_path(RuntimePath::Cache, tdir.path()), tdir.path());
+	assert_equal(runtime_path(RuntimePath::XapianDb, tdir.path()),
+		     join_paths(tdir.path(), "xapian"));
+	assert_equal(runtime_path(RuntimePath::Bookmarks, tdir.path()),
+		     join_paths(tdir.path(), "bookmarks"));
+	assert_equal(runtime_path(RuntimePath::Config, tdir.path()), tdir.path());
+	assert_equal(runtime_path(RuntimePath::Scripts, tdir.path()),
+		     join_paths(tdir.path(), "scripts"));
+}
 
 int
 main(int argc, char* argv[])
@@ -473,6 +511,8 @@ main(int argc, char* argv[])
 			test_program_in_path);
 	g_test_add_func("/utils/join-paths",
 			test_join_paths);
+	g_test_add_func("/utils/runtime-paths",
+			test_runtime_paths);
 
 	return g_test_run();
 }

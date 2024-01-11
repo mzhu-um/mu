@@ -1,4 +1,4 @@
-;;; mu4e-contacts.el -- Dealing with contacts -*- lexical-binding: t -*-
+;;; mu4e-contacts.el --- Dealing with contacts -*- lexical-binding: t -*-
 
 ;; Copyright (C) 2022-2023 Dirk-Jan C. Binnema
 
@@ -26,6 +26,7 @@
 
 ;;; Code:
 (require 'cl-lib)
+(require 'message)
 (require 'mu4e-helpers)
 (require 'mu4e-update)
 
@@ -79,13 +80,6 @@ their canonical counterpart; useful as an example."
         (mail (plist-get contact :mail)))
     (list :name name :mail mail)))
 
-(make-obsolete-variable 'mu4e-contact-rewrite-function
-                        "mu4e-contact-process-function (see docstring)"
-                        "mu4e 1.3.2")
-(make-obsolete-variable 'mu4e-compose-complete-ignore-address-regexp
-                        "mu4e-contact-process-function (see docstring)"
-                        "mu4e 1.3.2")
-
 (defcustom mu4e-contact-process-function
   (lambda(addr)
     (cond
@@ -130,9 +124,10 @@ predicate function. A value of nil keeps all the addresses."
 
 ;;; user mail address
 (defun mu4e-personal-addresses (&optional no-regexp)
-  "Get the list user's personal addresses, as passed to mu init.
-The address are either plain e-mail address or /regular
- expressions/.  When NO-REGEXP is non-nil, do not include regexp
+  "Get the list user's personal addresses, as passed to \"mu init\".
+
+The address are either plain e-mail addresses or regexps (strings
+ wrapped / /). When NO-REGEXP is non-nil, do not include regexp
  address patterns (if any)."
   (seq-remove
    (lambda (addr) (and no-regexp (string-match-p "^/.*/" addr)))
@@ -154,19 +149,21 @@ with both the plain addresses and /regular expressions/."
          (eq t (compare-strings addr nil nil m nil nil 'case-insensitive))))
      (mu4e-personal-addresses))))
 
-(define-obsolete-function-alias 'mu4e-user-mail-address-p
-  'mu4e-personal-address-p "1.5.5")
+(defun mu4e-personal-or-alternative-address-p (addr)
+  "Is ADDR either a personal or an alternative address?
 
+That is, does it match either `mu4e-personal-address-p' or
+`message-alternative-emails'.
 
-;; don't use the older vars anymore
-(make-obsolete-variable 'mu4e-user-mail-address-regexp
-                        'mu4e-user-mail-address-list "0.9.9.x")
-(make-obsolete-variable 'mu4e-my-email-addresses
-                        'mu4e-user-mail-address-list "0.9.9.x")
-(make-obsolete-variable 'mu4e-user-mail-address-list
-                        "determined by server; see `mu4e-personal-addresses'."
-                        "1.3.8")
-
+Note that this expanded definition of user-addresses not used for
+ indexing mu does not know about `message-alternative-emails' so
+ it cannot use it for indexing."
+  (let ((alts message-alternative-emails))
+    (or (mu4e-personal-address-p addr)
+        (cond
+         ((functionp alts) (funcall alts addr))
+         ((stringp alts)   (string-match alts addr))
+         (t nil)))))
 
 ;; Helpers
 
@@ -192,7 +189,7 @@ matches, nil is returned, if not, it returns a symbol
    ((= (aref ph 0) ?\")
     (if (string-match "\"\\([^\"\\\n]\\|\\\\.\\|\\\\\n\\)*\"" ph)
         'rfc822-quoted-string
-      'rfc822-containing-quote)) ; starts with quote, but doesn't end with one
+      'rfc822-containing-quote))   ; starts with quote, but doesn't end with one
    ((string-match-p "[\"]" ph) 'rfc822-containing-quote)
    ((string-match-p "[\000-\037()\*<>@,;:\\\.]+" ph) nil)
    (t 'rfc822-atom)))
@@ -281,7 +278,7 @@ For testing/debugging."
 (declare-function mu4e--server-contacts  "mu4e-server")
 
 (defun mu4e--request-contacts-maybe ()
-  "Maybe update the set of contacts for autocompletion. 
+  "Maybe update the set of contacts for autocompletion.
 
 If `mu4e-compose-complete-addresses' is non-nil, get/update the
 list of contacts we use for autocompletion; otherwise, do

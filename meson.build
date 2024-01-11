@@ -1,4 +1,4 @@
-## Copyright (C) 2022-2023 Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
+## Copyright (C) 2022-2024 Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
 ##
 ## This program is free software; you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by
@@ -17,16 +17,18 @@
 ################################################################################
 # project setup
 project('mu', ['c', 'cpp'],
-        version: '1.11.20',
+        version: '1.11.27',
         meson_version: '>= 0.56.0',
         license: 'GPL-3.0-or-later',
         default_options : [
           'buildtype=debugoptimized',
           'warning_level=3',
           'c_std=c11',
-          'cpp_std=c++17'
-        ]
-       )
+          'cpp_std=c++17'])
+
+# hard-code the date here (for reproduciblity); we derive the dates used in e.g.
+# documentation from this.
+mu_date='2024-01-01'
 
 # installation paths
 prefixdir = get_option('prefix')
@@ -42,7 +44,6 @@ else
   mu4e_lispdir= get_option('lispdir') / 'mu4e'
 endif
 
-
 ################################################################################
 # compilers / flags
 #
@@ -57,10 +58,11 @@ extra_flags = [
   '-Wformat-security',
   '-Wformat=2',
   '-Wstack-protector',
+  '-fstack-protector-strong',
   '-Wno-switch-enum',
   # assuming these are false alarm... (in fmt, with gcc13):
   '-Wno-array-bounds',
-  '-Wno-stringop-overflow']
+  '-Wno-stringop-overflow',]
 
 if (cxx.get_id() == 'clang')
   extra_flags += [
@@ -76,6 +78,7 @@ extra_cpp_flags= [
 
 if get_option('buildtype') == 'debug'
   extra_flags += [
+    '-D_GLIBCXX_ASSERTIONS',
     '-ggdb',
     '-g3']
 endif
@@ -96,6 +99,23 @@ endforeach
 # some clang don't have charconv, but we need it.
 # https://github.com/djcb/mu/issues/2347
 cxx.check_header('charconv', required:true)
+
+
+build_aux = join_paths(meson.current_source_dir(), 'build-aux')
+################################################################################
+# derived date values (based on 'mu-date'); used in docs
+# we can't use the 'date' because MacOS 'date' is incompatible with GNU's.
+pdate=find_program(join_paths(build_aux, 'date.py'))
+env = environment()
+env.set('LANG', 'C')
+mu_day_month_year = run_command(pdate, mu_date, '%d %B %Y',
+                                check:true, capture:true,
+                                env: env).stdout().strip()
+mu_month_year = run_command(pdate, mu_date, '%B %Y',
+                            check:true, capture:true,
+                            env: env).stdout().strip()
+mu_year = run_command(pdate, mu_date, '%Y',
+                      check:true, capture:true, env: env).stdout().strip()
 
 ################################################################################
 # config.h setup
@@ -222,8 +242,7 @@ else
   if not install_info.found()
     message('install-info not found')
   else
-    install_info_script=join_paths(meson.current_source_dir(), 'build-aux',
-                                   'meson-install-info.sh')
+    install_info_script=join_paths(build_aux, 'meson-install-info.sh')
   endif
 endif
 
@@ -244,12 +263,13 @@ endif
 version_texi_data=configuration_data()
 version_texi_data.set('VERSION', meson.project_version())
 version_texi_data.set('EDITION', meson.project_version())
-version_texi_data.set('UPDATED',
-                      run_command('date', '+%d %B %Y', check:true).stdout().strip())
-version_texi_data.set('UPDATEDMONTH',
-                      run_command('date', '+%B %Y', check:true).stdout().strip())
 
-configure_file(input: join_paths('build-aux', 'version.texi.in'),
+# derived date values
+version_texi_data.set('UPDATED', mu_day_month_year)
+version_texi_data.set('UPDATEDMONTH', mu_month_year)
+version_texi_data.set('UPDATEDYEAR', mu_year)
+
+configure_file(input: join_paths(build_aux, 'version.texi.in'),
                output: 'version.texi',
                configuration: version_texi_data)
 

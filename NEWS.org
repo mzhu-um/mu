@@ -5,7 +5,10 @@
 
 *** mu
 
-    - ~mu~ commands ~extract~, ~verify~ and ~view~ can now read the message from
+    - new command ~mu move~ to move messages across maildirs and/or change their
+      flags. See the manpage for all the details.
+
+    - ~mu~ commands ~extract~ ~verify~ and ~view~ can now read the message from
       standard input; see their man-pages for details
 
     - ~mu init~ gained the ~--ignored-address~ option for email-addresses / regexps
@@ -36,14 +39,14 @@
       messages; you can then search by their ISO-639-1 code, e.g.:
        ~$ mu find lang:en~
 
-    - set the default database batch-size to the ~mu init~ command) to 50000
+    - set the default database batch-size (using the ~mu init~ command) to 50000
       rather than 250000; the latter was too high for systems with limited
       memory. You can of course change that with ~--batch-size=...~
 
     - restore expansion for path options such as ~--maildir=~/Maildir~ (to e.g.
-      ~/home/user/Maildir~) for shells that don't do that, such as Bash.
+      ~/home/user/Maildir~) for shells that do not do that, such as Bash.
 
-    - overhauled query-parser; this is (should be) compatible with the older
+    - overhauled the query-parser; this is (should be) compatible with the older
       one, apart from a number of fixes. There is a new option ~--analyze~ for the
       ~mu find~ command, which shows the parsed query in a (hopefully)
       human-readable s-expression form; this can be used to debug your queries
@@ -54,7 +57,57 @@
       as Chinese/Japanese/Korean. See the *mu-init* manpages, in particular the
       ~--support-ngrams~ option, and why you may (or may not) want to enable that.
 
+    - the build has been made reproducible
+
 *** mu4e
+
+**** message composer
+
+    - Overhaul of the message composer; it is now closer to the Gnus/Message
+      composer functions (e.g. the whole mu4e-specific draft setup is gone);
+      this reduces code size and offers some new capabilities.
+
+      More of the ~message-~ functionality can be used now in ~mu4e~.
+
+    - Variables ~mu4e-compose-signature~, ~mu4e-compose-cite-function~ are gone
+      (with aliases in place), use ~message-signature~, ~message-cite-function~
+      instead. There's a special ~mu4e-message-cite-nothing~ for the case where
+      you do not want to cite anything.
+
+    - There's a new function ~mu4e-compose-wide-reply~ (bound to =W=) which does a
+      wide-reply, a.k.a., 'reply to all'. So ~mu4e-compose-reply-recipients~ is
+      not needed anymore and has been obsoleted (and doesn't do anything).
+      ~mu4e-compose-reply-ignore-address~ is no longer supported, use
+      ~message-prune-recipient-rules~ instead.
+
+      Same for ~mu4e-compose-dont-reply-to-self~; roughly the same effect can be
+      achieved by setting ~message-dont-reply-to-names~ to
+      ~#'mu4e-personal-or-alternative-address-p~. This only works for
+      [[info:(message) Wide Reply][wide-replies]].
+
+    - Another new function is ~mu4e-compose-supersede~ (not bound to any key by
+      default), with which you can /supersede/ your own messages; that is, send
+      the message as a kind-of reply to the same recipients. This only works if
+      you were the sender.
+
+    - The special mailing list handling is gone; ~mu4e-compose-reply~ and
+      ~mu4e-compose-wide-reply~ should take care of that. There's also
+      ~message-reply-to-function~ for ultimate control; see [[info:(message)
+      Reply][info (message) Reply]] for details.
+
+    - ~mu4e-compose-in-new-frame~ has been generalized (in a backward-compatible
+      way) to ~mu4e-compose-switch~, which lets you decide whether a message
+      should be composed in the current window (default), a new window or a new
+      frame.
+
+    - ~mu4e-compose-context-switch~ is gone; it was a little too fragile. Best
+      change when creating the message (=mu4e= asks you by default, see
+      ~mu4e-compose-context-policy~).
+
+    - iCalendar support is a work-in-progress with the new editor. One change is
+      that support is now _automatically_ available.
+
+**** other
 
     - New command ~mu4e-search-query~ (bound to =c=) which lets you pick a query
       (from bookmark / maildir shortcuts) with completion in main / headers /
@@ -100,6 +153,10 @@
     - after retrieving mail (~mu4e-update-mail-and-index~), save the output of the
       retrieval command in a buffer =*mu4e-last-update*=, = which can be useful
       for diagnosis.
+
+    - support new-mail notifications on MacOS out-of-the-box
+
+    - allow sorting by tag
 
     - ~mu4e~ now follows Emacs' ~package~ guidelines
 

@@ -242,7 +242,7 @@ Return the matching choice value (cdr of the cell)."
              ;; Require confirmation, if the input does not match a suggestion
              nil t nil nil nil))))
     (or quick-result
-        (cdr (assoc result choices)))))
+        (cdadr (assoc result choices)))))
 
 (defun mu4e--read-choice-builtin (prompt choices)
   "Read and return one of CHOICES, prompting for PROMPT.
@@ -517,10 +517,6 @@ in an external program."
     (run-at-time "30 sec" nil
                  (lambda () (ignore-errors (delete-file tmpfile))))
     tmpfile))
-
-(defsubst mu4e-is-mode-or-derived-p (mode)
-  "Is the current mode equal to MODE or derived from it?"
-  (or (eq major-mode mode) (derived-mode-p mode)))
 
 (defun mu4e-display-manual ()
   "Display the mu4e manual page for the current mode.

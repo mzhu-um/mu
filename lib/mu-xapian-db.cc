@@ -21,6 +21,7 @@
 #include "mu-xapian-db.hh"
 #include "utils/mu-utils.hh"
 #include <inttypes.h>
+#include <mu-config.hh>
 
 #include <mutex>
 
@@ -90,17 +91,58 @@ make_db(const std::string& db_path, Flavor flavor)
 		return Xapian::WritableDatabase(db_path, Xapian::DB_OPEN);
 	case Flavor::CreateOverwrite:
 		return Xapian::WritableDatabase(db_path, Xapian::DB_CREATE_OR_OVERWRITE);
+		/* LCOV_EXCL_START*/
 	default:
 		throw std::logic_error("unknown flavor");
+		/* LCOV_EXCL_STOP*/
 	}
 }
 
-XapianDb::XapianDb(const std::string& db_path, Flavor flavor) :
+XapianDb::XapianDb(const std::string& db_path, Flavor flavor):
 	path_(make_path(db_path, flavor)),
-	db_(make_db(path_,flavor)) {
-
+	db_(make_db(path_, flavor)),
+	batch_size_{Config(*this).get<Config::Id::BatchSize>()}
+{
 	if (flavor == Flavor::CreateOverwrite)
 		set_timestamp(MetadataIface::created_key);
 
-	mu_debug("created {} / {}", flavor, *this);
+	mu_debug("created {} / {} (batch-size: {})", flavor, *this, batch_size_);
 }
+
+
+#ifdef BUILD_TESTS
+/*
+ * Tests.
+ *
+ */
+
+#include "utils/mu-test-utils.hh"
+#include "config.h"
+#include "mu-store.hh"
+
+static void
+test_errors()
+{
+	allow_warnings();
+
+	TempDir tdir;
+	auto store = Store::make_new(tdir.path(), MU_TESTMAILDIR2);
+	assert_valid_result(store);
+	g_assert_true(store->empty());
+
+	XapianDb xdb(tdir.path(), Flavor::ReadOnly);
+	g_assert_true(xdb.read_only());
+
+	g_assert_false(!!xdb.delete_document("Boo"));
+}
+
+int
+main(int argc, char* argv[])
+{
+	mu_test_init(&argc, &argv);
+
+	g_test_add_func("/xapian-db/errors", test_errors);
+
+	return g_test_run();
+}
+#endif /*BUILD_TESTS*/

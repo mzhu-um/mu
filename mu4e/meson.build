@@ -43,7 +43,6 @@ mu4e_srcs=[
   'mu4e-contacts.el',
   'mu4e-context.el',
   'mu4e-contrib.el',
-  'mu4e-draft.el',
   'mu4e-folders.el',
   'mu4e.el',
   'mu4e-headers.el',
@@ -76,30 +75,15 @@ mu4e_srcs=[
 #
 #... so let's not do that!
 
-# hack-around for native compile issue: copy sources to builddir.
-# see: https://debbugs.gnu.org/db/47/47987.html
-foreach src : mu4e_srcs
-  configure_file(input: src, output:'@BASENAME@.el', copy:true,
-                 install_mode: 'r--r--r--')
-endforeach
-
-# this depends on the above hack: all mu4e elisp files needs to be in builddir
-mu4e_autoloads = configure_file(
-  output: 'mu4e-autoloads.el',
-  install: true,
-  install_dir: mu4e_lispdir,
-  command: [emacs,
-            '--no-init-file',
-            '--batch',
-            '--load', 'package',
-            '--eval', '(package-generate-autoloads "mu4e" "' + meson.current_build_dir() + '" )'])
-
 foreach src : mu4e_srcs
   target_name= '@BASENAME@.elc'
   target_path = join_paths(meson.current_build_dir(), target_name)
   target_func = '(setq byte-compile-dest-file-function(lambda(_) "' + target_path + '"))'
 
-  # todo: depfile.
+  # hack-around for native compile issue: copy sources to builddir.
+  # see: https://debbugs.gnu.org/db/47/47987.html
+  configure_file(input: src, output:'@BASENAME@.el', copy:true,
+                 install_mode: 'r--r--r--')
 
   custom_target(src.underscorify() + '_el',
                 build_by_default: true,
@@ -112,15 +96,27 @@ foreach src : mu4e_srcs
                 command: [emacs,
                           '--no-init-file',
                           '--batch',
-                          '--directory', meson.current_build_dir(),
                           '--directory', meson.current_source_dir(),
-                          '--eval', '(setq load-prefer-newer t)',
+                          '--directory', meson.current_build_dir(),
                           # we don't need warnings for items that have become
                           # obsolete _after_ our last supported emacs release.
                           '--eval', '(setq byte-compile-warnings \'(not obsolete))',
                           '--eval', target_func,
                           '--funcall', 'batch-byte-compile', '@INPUT@'])
+
 endforeach
+
+# this depends on the above hack: all mu4e elisp files needs to be in builddir
+mu4e_autoloads = configure_file(
+  output: 'mu4e-autoloads.el',
+  install: true,
+  install_dir: mu4e_lispdir,
+  command: [emacs,
+            '--no-init-file',
+            '--batch',
+            '--load', 'package',
+            '--eval', '(package-generate-autoloads "mu4e" "' +
+                      meson.current_build_dir() + '" )'])
 
 # also install the sources and the config
 install_data(mu4e_srcs, install_dir: mu4e_lispdir)
@@ -129,19 +125,6 @@ install_data(mu4e_srcs, install_dir: mu4e_lispdir)
 install_data('mu4e-about.org', install_dir : join_paths(datadir, 'doc', 'mu'))
 
 if makeinfo.found()
-
-  fulldate = run_command('date', '+%d %B %Y', check:true).stdout().strip()
-  monthdate = run_command('date', '+%B %Y', check:true).stdout().strip()
-  version_texi_data = configuration_data({
-    'fulldate'  : fulldate,
-    'monthdate' : monthdate,
-    'version'   : meson.project_version(),
-  })
-  version_texi = configure_file(
-    input:  'version.texi.in',
-    output: 'version.texi',
-    configuration: version_texi_data)
-
   custom_target('mu4e_info',
                 input: 'mu4e.texi',
                 output: 'mu4e.info',
