@@ -17,7 +17,7 @@
 ################################################################################
 # project setup
 project('mu', ['c', 'cpp'],
-        version: '1.11.27',
+        version: '1.12.2',
         meson_version: '>= 0.56.0',
         license: 'GPL-3.0-or-later',
         default_options : [
@@ -28,7 +28,7 @@ project('mu', ['c', 'cpp'],
 
 # hard-code the date here (for reproduciblity); we derive the dates used in e.g.
 # documentation from this.
-mu_date='2024-01-01'
+mu_date='2024-03-16'
 
 # installation paths
 prefixdir = get_option('prefix')
@@ -189,11 +189,11 @@ else
 endif
 
 # optionally, use Compact Language Detector2 if we can find it.
-cld2_dep = meson.get_compiler('cpp').find_library('cld2', required: false)
-if cld2_dep.found()
+cld2_dep = meson.get_compiler('cpp').find_library('cld2', required: get_option('cld2'))
+if not get_option('cld2').disabled() and cld2_dep.found()
   config_h_data.set('HAVE_CLD2', 1)
 else
-  message('CLD2 not found; no support for language detection')
+  message('CLD2 not found or disabled; no support for language detection')
 endif
 
 # note: these are for the unit-tests

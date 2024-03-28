@@ -1,6 +1,6 @@
 ;;; mu4e-helpers.el --- Helper functions -*- lexical-binding: t -*-
 
-;; Copyright (C) 2022-2023  Dirk-Jan C. Binnema
+;; Copyright (C) 2022-2024  Dirk-Jan C. Binnema
 
 ;; Author: Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
 ;; Maintainer: Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
@@ -52,12 +52,12 @@ Suggested possible values are:
 The function is used in two contexts -
 1) directly - for instance in when listing _other_ maildirs
    in `mu4e-ask-maildir'
-2) if  `mu4e-read-option-use-builtin' is nil, it is used
+2) if `mu4e-read-option-use-builtin' is nil, it is used
    as part of `mu4e-read-option' in many places.
 
 Set it to `completing-read' when you want to use completion
 frameworks such as Helm, Ivy or Vertico. In that case, you
-might want to add soemthing like the following in your configuration.
+might want to add something like the following in your configuration.
 
    (setq mu4e-read-option-use-builtin nil
          mu4e-completing-read-function \\='completing-read)
@@ -177,8 +177,8 @@ Does a local-exit and does not return."
 (defun mu4e--matching-choice (choices kar)
   "Does KAR match any of the  CHOICES?
 
-KAR is a character and CHOICES is an alist as describe in
-`mu4e--read-choice-builting'.
+KAR is a character and CHOICES is an alist as described in
+`mu4e--read-choice-builtin'.
 
 First try an exact match, but if there isn't, try
 case-insensitive.
@@ -591,7 +591,7 @@ This is mu4e's version of Emacs 29's `plistp'."
 If it is unbound, return nil. If there are multiple bindings,
 return the shortest.
 
-Rougly does what `substitute-command-keys' does, but picks
+Roughly does what `substitute-command-keys' does, but picks
 shorter keys in some cases where there are multiple bindings."
   ;; not a perfect heuristic: e.g. '<up>' is longer that 'C-p'
   (car-safe

@@ -1,6 +1,6 @@
 ;;; mu4e-compose.el --- Compose and send messages -*- lexical-binding: t -*-
 
-;; Copyright (C) 2011-2023 Dirk-Jan C. Binnema
+;; Copyright (C) 2011-2024 Dirk-Jan C. Binnema
 
 ;; Author: Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
 ;; Maintainer: Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
@@ -28,8 +28,10 @@
 ;; the mu4e context.
 
 
-;; Code
+;;; Code:
 (require 'message)
+(require 'sendmail)
+(require 'gnus-msg)
 (require 'nnheader) ;; for make-full-mail-header
 
 (require 'mu4e-obsolete)
@@ -74,9 +76,11 @@ for querying the message information."
 (defcustom mu4e-compose-switch nil
   "Where to display the new message?
 A symbol:
-- nil       : default (new buffer)
-- window    : compose in new window
-- frame or t: compose in new frame
+- nil           : default (new buffer)
+- window        : compose in new window
+- frame or t    : compose in new frame
+- display-buffer: use `display-buffer' / `display-buffer-alist'
+  (for fine-tuning).
 
 For backward compatibility with `mu4e-compose-in-new-frame', t is
 treated as =\\'frame."
@@ -138,7 +142,7 @@ All `sign-*' options have a `encrypt-*' analogue."
               (const :tag "Encrypt all messages" encrypt-all-messages)
               (const :tag "Sign new messages" sign-new-messages)
               (const :tag "Encrypt new messages" encrypt-new-messages)
-y              (const :tag "Sign forwarded messages" sign-forwarded-messages)
+              (const :tag "Sign forwarded messages" sign-forwarded-messages)
               (const :tag "Encrypt forwarded messages"
                      encrypt-forwarded-messages)
               (const :tag "Sign edited messages" sign-edited-messages)
@@ -189,6 +193,97 @@ messages, it is nil.")
 
 (defvar-local mu4e-compose-type nil
   "The compose-type for the current message.")
+
+(defvar mu4e-captured-message)
+(defun mu4e-compose-attach-captured-message ()
+  "Insert the last captured message file as an attachment.
+Messages are captured with `mu4e-action-capture-message'."
+  (interactive)
+  (if-let* ((msg mu4e-captured-message)
+            (path (plist-get msg :path))
+            (path (and (file-exists-p path) path)))
+      (mml-attach-file
+       path
+       "message/rfc822"
+       (or (plist-get msg :subject) "No subject")
+       "attachment")
+    (mu4e-warn "No valid message has been captured")))
+
+;; Go to bottom / top
+
+(defun mu4e-compose-goto-top (&optional arg)
+  "Go to the beginning of the message or buffer.
+Go to the beginning of the message or, if already there, go to
+the beginning of the buffer.
+
+Push mark at previous position, unless either a
+\\[universal-argument] prefix ARG is supplied, or Transient Mark mode
+is enabled and the mark is active."
+  (interactive "P")
+  (or arg
+      (region-active-p)
+      (push-mark))
+  (let ((old-position (point)))
+    (message-goto-body)
+    (when (equal (point) old-position)
+      (goto-char (point-min)))))
+
+(defun mu4e-compose-goto-bottom (&optional arg)
+  "Go to the end of the message or buffer.
+Go to the end of the message (before signature) or, if already
+there, go to the end of the buffer.
+
+Push mark at previous position, unless either a
+\\[universal-argument] prefix ARG is supplied, or Transient Mark mode
+is enabled and the mark is active."
+  (interactive "P")
+  (or arg
+      (region-active-p)
+      (push-mark))
+  (let ((old-position (point))
+        (message-position (save-excursion (message-goto-body) (point))))
+    (goto-char (point-max))
+    (when (re-search-backward message-signature-separator message-position t)
+      (forward-line -1))
+    (when (equal (point) old-position)
+      (goto-char (point-max)))))
+
+(defun mu4e-compose-context-switch (&optional force name)
+  "Change the context for the current draft message.
+
+With NAME, switch to the context with NAME, and with FORCE non-nil,
+switch even if the switch is to the same context.
+
+Like `mu4e-context-switch' but with some changes after switching:
+1. Update the From and Organization headers as per the new context
+2. Update the `message-signature' as per the new context.
+
+Unlike some earlier version of this function, does _not_ update
+the draft folder for the messages, as that would require changing
+the file under our feet, which is a bit fragile."
+  (interactive "P")
+
+  (unless (derived-mode-p 'mu4e-compose-mode)
+    (mu4e-error "Only available in mu4e compose buffers"))
+
+  (let ((old-context (mu4e-context-current)))
+    (unless (and name (not force) (eq old-context name))
+      (unless (and (not force)
+                   (eq old-context (mu4e-context-switch nil name)))
+        (save-excursion
+          ;; Change From / Organization if needed.
+          (message-replace-header "Organization"
+                                  (or (message-make-organization) "")
+                                  '("Subject")) ;; keep in same place
+          (message-replace-header "From"
+                                  (or (message-make-from) ""))
+          ;; Update signature.
+          (when (message-goto-signature) ;; delete old signature.
+            (if message-signature-insert-empty-line
+                (forward-line -2) (forward-line -1))
+            (delete-region (point) (point-max)))
+          (when message-signature
+              (save-excursion (message-insert-signature))))))))
 
 
 ;;; Filenames
@@ -452,20 +547,6 @@ appropriate flag at the message forwarded or replied-to."
   "Function called just after sending a message."
   (setq mu4e-sent-func #'mu4e-sent-handler)
   (mu4e--server-sent (buffer-file-name)))
-
-(defun mu4e-message-kill-buffer ()
-  "Wrapper around `message-kill-buffer'.
-It attempts to restore some mu4e window layout after killing the
-compose-buffer."
-  (interactive)
-  (let ((view (save-selected-window (mu4e-get-view-buffer)))
-        (hdrs (mu4e-get-headers-buffer)))
-    (message-kill-buffer)
-    ;; try to go back to some mu window if it is live; otherwise do nothing.
-    (if (buffer-live-p view)
-        (switch-to-buffer view)
-      (when (and (buffer-live-p hdrs))
-        (switch-to-buffer hdrs)))))
 
 ;;; Crypto
 (defun mu4e--compose-setup-crypto (parent compose-type)
@@ -526,9 +607,18 @@ buffers; lets remap its faces so it uses the ones for mu4e."
 (defvar mu4e-compose-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map message-mode-map)
-    (define-key map (kbd "C-S-u")               #'mu4e-update-mail-and-index)
-    (define-key map (kbd "C-c C-u")             #'mu4e-update-mail-and-index)
-    (define-key map [remap message-kill-buffer] #'mu4e-message-kill-buffer)
+    (define-key map (kbd "C-S-u")    #'mu4e-update-mail-and-index)
+    (define-key map (kbd "C-c C-u")  #'mu4e-update-mail-and-index)
+    (define-key map (kbd "C-c ;")    #'mu4e-compose-context-switch)
+
+    ;; emacs 29
+    ;;(keymap-set map "<remap> <beginning-of-buffer>" #'mu4e-compose-goto-top)
+    ;;(keymap-set map "<remap> <end-of-buffer>" #'mu4e-compose-goto-bottom)
+    (define-key map (vector 'remap #'beginning-of-buffer)
+                #'mu4e-compose-goto-top)
+    (define-key map (vector 'remap #'end-of-buffer)
+                #'mu4e-compose-goto-bottom)
+
     ;; remove some unsupported commands... [remap ..]  does not work here
     ;; XXX remove from menu, too.
     (define-key map (kbd "C-c C-f C-n")   nil) ;; message-goto-newsgroups
@@ -617,7 +707,7 @@ With HEADERS-ONLY non-nil, only include the headers part."
     (buffer-substring-no-properties (point-min) (point-max))))
 
 (defun mu4e--compose-cite (msg)
-  "Return a cited version of the ORIG message (a string).
+  "Return a cited version of the ORIG message MSG (a string).
 This function uses `message-cite-function', and its settings apply."
   (with-temp-buffer
     (insert (mu4e-view-message-text msg))
@@ -638,23 +728,28 @@ This function uses `message-cite-function', and its settings apply."
   "Function to switch & display composition buffer.
 Based on the value of `mu4e-compose-switch'."
   (pcase mu4e-compose-switch
-    ('nil           #'switch-to-buffer)
-    ('window        #'switch-to-buffer-other-window)
-    ((or 'frame 't) #'switch-to-buffer-other-frame)
+    ('nil             #'switch-to-buffer)
+    ('window          #'switch-to-buffer-other-window)
+    ((or 'frame 't)   #'switch-to-buffer-other-frame)
+    ('display-buffer  #'display-buffer)
     ;; t for backward compatibility with mu4e-compose-in-new-frame
     (_             (mu4e-error "Invalid mu4e-compose-switch"))))
 
 (defun mu4e--fake-pop-to-buffer (name &optional _switch)
-  "A fake `message-pop-to-buffer' which creates NAME.
+  "A fake `message-pop-to-buffer' for creating buffer NAME.
 This is a little glue to use `message-reply', `message-forward'
 etc. We cannot use the normal `message-pop-to-buffer' since we're
 not ready yet to show the buffer in mu4e."
-  (set-buffer (get-buffer-create name))
-  (erase-buffer)
-  (current-buffer))
+  ;; note: we're in a _different_ buffer here, so we need to copy
+  ;; message-reply-header's buffer-local value.
+  (let ((reply-headers message-reply-headers))
+    (set-buffer (get-buffer-create name))
+    (setq-local message-reply-headers reply-headers)
+    (erase-buffer)
+    (current-buffer)))
 
 (defun mu4e--headers (compose-type)
-  "Determine headers needed for message."
+  "Determine headers needed for message based on COMPOSE-TYPE."
   (seq-filter #'identity ;; ensure needed headers are generated.
        `(From Subject Date Message-ID
         ,(when (memq compose-type '(reply forward)) 'References)
@@ -663,7 +758,9 @@ not ready yet to show the buffer in mu4e."
         ,(when message-user-organization 'Organization))))
 
 (defun mu4e--compose-setup-buffer (compose-type compose-func parent)
-  "Set up a buffer for message composition before mu4e-compose-mode.
+  "Set up a buffer for message composition before `mu4e-compose-mode'.
+
+COMPOSE-TYPE is the type of message to creat.
 
 COMPOSE-FUNC is a function / lambda to create the specific type
 of message; it should return (but not show) the created buffer.
@@ -702,6 +799,7 @@ This is mu4e's version of `message-hidden-headers'.")
 
 (defun mu4e--message-is-yours-p (func &rest args)
   "Mu4e advice for `message-is-yours'.
+FUNC is the original function, and ARGS are its arguments.
 Is this address yours?"
   (if (mu4e-running-p)
       (let ((sender (message-fetch-field "from"))
@@ -713,7 +811,11 @@ Is this address yours?"
     (apply func args)))
 
 (defun mu4e--compose-setup-post (compose-type &optional parent)
-  "Prepare the new message buffer."
+  "Prepare the new message buffer.
+
+COMPOSE-TYPE determines the type of message to create. PARENT
+refers to the optional message to start from, i.e., the message
+replied to or forwarded, etc."
   (mu4e-compose-mode)
   ;; remember some variables, e.g for user hooks.
   (setq-local
@@ -743,25 +845,12 @@ Is this address yours?"
       (message-goto-to)
     (if (not (message-field-value "Subject"))
         (message-goto-subject)
-      (message-goto-body)))
+      (pcase message-cite-reply-position
+        ((or 'above 'traditional) (message-goto-body))
+        (_ (when (message-goto-signature) (forward-line -2))))))
   ;; buffer is not user-modified yet
   (set-buffer-modified-p nil)
   (undo-boundary))
-
-(defun mu4e--maybe-delete-frame ()
-  "Delete frame if there are multiple and current one has a single
-window."
-  ;; XXX: this doesn't quite work; need a way to filter out
-  ;; the one _real_ frame I'm looking at; but I always get 3 or so.
-  ;; Only consider _real_ frames with some size
-  ;; (when (one-window-p)
-  ;;   (let ((real-frames
-  ;;          (seq-filter (lambda (frame);; only count live visible parent frames.
-  ;;                        (not (frame-parent frame)))
-  ;;                      (visible-frame-list))))
-  ;;     (when (> (length real-frames) 1)
-  ;;       (delete-frame))))
-  )
 
 (defun mu4e--compose-setup (compose-type compose-func &optional switch)
   "Set up a new buffer for mu4e message composition.
@@ -774,7 +863,9 @@ COMPOSE-FUNC is a function / lambda to create the specific type
 of message.
 
 Optionally, SWITCH determines how to find a buffer for the message
-(see SWITCH-FUNCTION in `compose-mail')."
+\(see SWITCH-FUNCTION in `compose-mail').
+
+Returns the new buffer."
   (cl-assert (member compose-type '(reply forward edit new)))
   (unless (mu4e-running-p) (mu4e 'background)) ;; start if needed
   (let* ((parent
@@ -782,35 +873,39 @@ Optionally, SWITCH determines how to find a buffer for the message
             (mu4e-message-at-point)))
          (mu4e-compose-parent-message parent)
          (mu4e-compose-type compose-type)
-         (actions '(mu4e--maybe-delete-frame))
-         (buf))
+         (oldframe (selected-frame)))
     (advice-add 'message-is-yours-p :around #'mu4e--message-is-yours-p)
     (run-hooks 'mu4e-compose-pre-hook) ;; run the pre-hook. Still useful?
     (mu4e--context-autoswitch parent mu4e-compose-context-policy)
     (with-current-buffer
         (mu4e--compose-setup-buffer compose-type compose-func parent)
-      (funcall (or switch (mu4e--compose-switch-function)) (current-buffer))
       (unless (eq compose-type 'edit)
         (set-visited-file-name ;; make it a draft file
          (mu4e--draft-message-path (mu4e--message-basename) parent)))
       (mu4e--compose-setup-post compose-type parent)
-      ;; handle closing of frames.
-      (setq-local ;;message-kill-actions actions
-       message-postpone-actions actions
-       message-send-actions actions)
-      (setq buf (current-buffer)))
-    (switch-to-buffer buf)))
+      (funcall (or switch (mu4e--compose-switch-function)) (current-buffer))
+      (let* ((msgframe (selected-frame))
+             (actions (list
+                       (lambda () ;; kill frame when it was created for this
+                         (unless (eq oldframe msgframe)
+                           (delete-frame msgframe))))))
+        ;; handle closing of frames.
+        (setq-local ;;message-kill-actions actions
+         message-return-actions actions
+         message-send-actions actions
+         message-kill-actions actions))
+      (current-buffer))))
 
 
 ;;;###autoload
 (defun mu4e-compose-new (&optional to subject other-headers continue
                                    switch-function yank-action send-actions
                                    return-action &rest _)
-  "This is mu4e's implementation of `compose-mail'. TO, SUBJECT,
-OTHER-HEADERS, CONTINUE, SWITCH-FUNCTION, YANK-ACTION
-SEND-ACTIONS RETURN-ACTION are as described in `compose-mail',
-and to the extend that they do not conflict with mu4e inner
-workings."
+  "Mu4e's implementation of `compose-mail'.
+TO, SUBJECT, OTHER-HEADERS, CONTINUE, SWITCH-FUNCTION,
+YANK-ACTION SEND-ACTIONS RETURN-ACTION are as described in
+`compose-mail', and to the extend that they do not conflict with
+mu4e inner workings."
   (interactive)
   (mu4e--compose-setup
    'new (lambda (_parent)
@@ -898,8 +993,8 @@ must be from current user, as determined through
 
 ;;;###autoload
 (defun mu4e-compose-resend (address)
-  "Re-send the message at point.
-The message is resent as-is, without any editing. "
+  "Re-send the message at point to ADDRESS.
+The message is resent as-is, without any editing."
   (interactive
    (list (completing-read
           "Resend message to address: " mu4e--contacts-set)))
@@ -917,7 +1012,7 @@ The message is resent as-is, without any editing. "
 (define-mail-user-agent 'mu4e-user-agent
   #'mu4e-compose-mail
   #'message-send-and-exit
-  #'mu4e-message-kill-buffer
+  #'message-kill-buffer
   'message-send-hook)
 
 ;; Without this, `mail-user-agent' cannot be set to `mu4e-user-agent'

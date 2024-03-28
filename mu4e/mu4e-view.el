@@ -1,6 +1,6 @@
 ;;; mu4e-view.el --- Mode for viewing e-mail messages -*- lexical-binding: t -*-
 
-;; Copyright (C) 2021-2023 Dirk-Jan C. Binnema
+;; Copyright (C) 2021-2024 Dirk-Jan C. Binnema
 
 ;; Author: Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
 ;; Maintainer: Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
@@ -69,8 +69,8 @@ For the complete list of available headers, see
 
 Note, you can use this to add fields that are not otherwise
 shown; you can further tweak the other fields using e.g.,
-`gnus-article-hide-boring-headers', `gnus-article-hide-headers'
-etc., see the gnus documentation for details."
+`gnus-visible-headers' and `gnus-ignored-headers' - see the gnus
+documentation for details."
   :type '(repeat symbol)
   :group 'mu4e-view)
 
@@ -431,11 +431,10 @@ list."
 
 (defvar mu4e-view-active-urls-keymap
   (let ((map (make-sparse-keymap)))
-    (define-key map [down-mouse-1] 'mu4e--view-browse-url-from-binding)
-    (define-key map [mouse-1] 'mu4e--view-browse-url-from-binding)
-    (define-key map (kbd "M-<return>") 'mu4e--view-browse-url-from-binding)
+    (define-key map (kbd "<mouse-2>")  #'mu4e--view-browse-url-from-binding)
+    (define-key map (kbd "M-<return>") #'mu4e--view-browse-url-from-binding)
     map)
-  "Keymap used for the urls inside the body.")
+  "Keymap used for the URLs inside the body.")
 
 (defvar mu4e--view-beginning-of-url-regexp
   "https?\\://\\|mailto:"

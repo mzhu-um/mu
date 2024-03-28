@@ -52,7 +52,7 @@ static std::string
 remove_slash(const std::string& str)
 {
 	auto clean{str};
-	while (clean[clean.length() - 1] == '/')
+	while (!clean.empty() && clean[clean.length() - 1] == '/')
 		clean.pop_back();
 
 	return clean;
@@ -89,8 +89,12 @@ struct Store::Private {
 	Config make_config(XapianDb& xapian_db, const std::string& root_maildir,
 			   Option<const Config&> conf) {
 
-		Config config{xapian_db};
+		if (!g_path_is_absolute(root_maildir.c_str()))
+			throw Error{Error::Code::File,
+					"root maildir path is not absolute ({})",
+					root_maildir};
 
+		Config config{xapian_db};
 		if (conf)
 			config.import_configurable(*conf);
 
@@ -651,7 +655,7 @@ Store::maildirs() const
 
 	Scanner::Handler handler = [&](const std::string& path, auto&& _1, auto&& _2) {
 		auto md{path.substr(prefix_size)};
-		mdirs.emplace_back(std::move(md.empty() ? "/" : md));
+		mdirs.emplace_back(md.empty() ? "/" : std::move(md));
 		return true;
 	};
 

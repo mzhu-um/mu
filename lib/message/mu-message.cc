@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2022-2023 Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
+** Copyright (C) 2022-2024 Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
 **
 ** This program is free software; you can redistribute it and/or modify it
 ** under the terms of the GNU General Public License as published by the
@@ -16,7 +16,7 @@
 ** Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 **
 */
-
+#include "config.h"
 
 #include "mu-message.hh"
 #include "gmime/gmime-references.h"
@@ -326,8 +326,16 @@ get_mailing_list(const MimeMessage& mime_msg)
 	const char *b, *e;
 
 	const auto hdr{mime_msg.header("List-Id")};
-	if (!hdr)
-		return {};
+	if (!hdr) {
+		/* some marketing messages don't have a List-Id, but _do_ have a
+		 * List-Unsubscribe; if so, return an empty string here, so this
+		 * message is still flagged as "MailingList"
+		 */
+		if (const auto lu = mime_msg.header("List-Unsubscribe"); !!lu)
+			return "";
+		else
+			return Nothing;
+	}
 
 	dechdr = g_mime_utils_header_decode_phrase(NULL, hdr->c_str());
 	if (!dechdr)

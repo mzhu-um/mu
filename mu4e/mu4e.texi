@@ -1400,7 +1400,7 @@ E            edit (only allowed for draft messages)
 actions
 -------
 g            go to (visit) numbered URL (using `browse-url')
-(or: <mouse-1> or M-RET with point on url)
+(or: <mouse-2> or M-RET with point on URL)
 C-u g visits multiple URLs
 f            fetch (download )the numbered URL.
 C-u f fetches multiple URLs
@@ -1612,6 +1612,7 @@ The major mode for the composer is @code{mu4e-compose-mode}.
 
 @menu
 * Composer overview: Composer overview. What is the composer good for
+* Entering the composer:: How to start writing messages
 * Keybindings: Composer Keybindings. Doing things with your keyboard
 * Address autocompletion:: Quickly entering known addresses
 * Compose hooks::Calling functions when composing
@@ -2606,8 +2607,7 @@ mu4e-context-switch}.
 @end itemize
 
 You can easily switch contexts manually using the @kbd{;} key from
-the main screen, or by pressing @kbd{C-c ;} when drafting a message
-using the editor view.
+the main screen.
 
 @node Contexts and special folders
 @section Contexts and special folders

@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2023 Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
+** Copyright (C) 2024 Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
 **
 ** This program is free software; you can redistribute it and/or modify it
 ** under the terms of the GNU General Public License as published by the
@@ -89,7 +89,7 @@ try {
 	return Err(Error{Error::Code::Xapian, "message not found in database"}.
 		   add_hint("Try reopening the database"));
 } catch (const Xapian::Error& xerr) {
-	return Err(Error::Code::Xapian, "{}", xerr.get_error_string());
+	return Err(Error::Code::Xapian, "{}", xerr.get_msg());
 } catch (const std::runtime_error& re) {
 	return Err(Error::Code::Internal, "runtime error: {}", re.what());
 } catch (const std::exception& e) {
@@ -447,12 +447,14 @@ public:
 				mu_critical("cannot dec transaction-level)");
 				throw std::runtime_error("cannot dec transactions");
 			}
-			if (tx_level_ == 1) {// need to commit the Xapian transaction?
-				mu_debug("committing {} changes", changes_);
-				wdb().commit_transaction();
-				changes_ = 0;
-			}
+
 			--tx_level_;
+			if (tx_level_ == 0) {// need to commit the Xapian transaction?
+				mu_debug("committing {} changes", changes_);
+				changes_ = 0;
+				wdb().commit_transaction();
+			}
+
 			mu_debug("dec'd tx level to {}", tx_level_);
 		});
 	}
@@ -534,10 +536,7 @@ private:
 
 	mutable std::mutex lock_;
 	std::string path_;
-
 	DbType	db_;
-	bool	in_tx_;
-
 	size_t	tx_level_{};
 	const size_t batch_size_;
 	size_t changes_{};
