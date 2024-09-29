@@ -1,6 +1,6 @@
 ;;; mu4e-server.el --- Control mu server from mu4e -*- lexical-binding: t -*-
 
-;; Copyright (C) 2011-2023 Dirk-Jan C. Binnema
+;; Copyright (C) 2011-2024 Dirk-Jan C. Binnema
 
 ;; Author: Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
 ;; Maintainer: Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
@@ -116,11 +116,6 @@ See `mu4e--server-filter' for the format.")
   "Function called for each :remove sexp returned.
 This happens when some message has been deleted. The function is
 passed the docid of the removed message.")
-
-(defvar mu4e-sent-func  nil
-  "Function called for each :sent sexp received.
-This happens when some message has been sent. The function is
-passed the docid and the draft-path of the sent message.")
 
 (defvar mu4e-view-func  nil
   "Function called for each single-message sexp.
@@ -358,12 +353,6 @@ The server output is as follows:
          ((plist-get sexp :erase)
           (funcall mu4e-erase-func))
 
-         ;; receive a :sent message
-         ((plist-get sexp :sent)
-          (funcall mu4e-sent-func
-                   (plist-get sexp :docid)
-                   (plist-get sexp :path)))
-
          ;; received a pong message
          ((plist-get sexp :pong)
           (setq mu4e--server-props (plist-get sexp :props))
@@ -442,7 +431,7 @@ As per issue #2198."
     ;; sanity-check 2
     (let ((version (let ((s (shell-command-to-string
                              (concat mu4e-mu-binary " --version"))))
-                     (and (string-match "version \\([.0-9]+\\)" s)
+                     (and (string-match "version \\(.+\\)" s)
                           (match-string 1 s)))))
       (if (not (string= version mu4e-mu-version))
           (mu4e-error
@@ -664,7 +653,7 @@ Returns either (:update ... ) or (:error ) sexp, which are handled my
   (unless (or (not maildir)
               (file-exists-p
                (mu4e-join-paths (mu4e-root-maildir) maildir)))
-    (mu4e-error "Target dir does not exist"))
+    (mu4e-error "Target directory does not exist"))
   (mu4e--server-call-mu
    `(move
      :docid ,(if (stringp docid-or-msgid) nil docid-or-msgid)
@@ -679,23 +668,18 @@ Returns either (:update ... ) or (:error ) sexp, which are handled my
   (mu4e--server-call-mu `(ping)))
 
 (defun mu4e--server-queries (queries)
-  "Sends queries to the mu server, expecting a (:queries ...) in response.
+  "Sends queries to the mu server, expecting a (:queries ...) sexp in response.
 QUERIES is a list of queries for the number of results with
 read/unread status are returned in the pong-response."
   (mu4e--server-call-mu `(queries :queries ,queries)))
 
-(defun mu4e--server-remove (docid)
-  "Remove message  with DOCID.
-The results are reporter through either (:update ... )
-or (:error) sexp, which are handled my `mu4e-error-func',
-respectively."
-  (mu4e--server-call-mu `(remove :docid ,docid)))
-
-(defun mu4e--server-sent (path)
-  "Tell the mu server we sent a message at PATH.
-If this works, we will receive (:info add :path <path> :docid
-<docid> :fcc <path>)."
-  (mu4e--server-call-mu `(sent :path ,path)))
+(defun mu4e--server-remove (docid-or-path)
+  "Remove message with either DOCID or PATH.
+The results are reported through either (:update ... )
+or (:error) sexps."
+  (if (stringp docid-or-path)
+      (mu4e--server-call-mu `(remove :path ,docid-or-path))
+      (mu4e--server-call-mu `(remove :docid ,docid-or-path))))
 
 (defun mu4e--server-view (docid-or-msgid &optional mark-as-read)
   "View a message referred to by DOCID-OR-MSGID.

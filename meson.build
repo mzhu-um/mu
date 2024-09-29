@@ -17,7 +17,7 @@
 ################################################################################
 # project setup
 project('mu', ['c', 'cpp'],
-        version: '1.12.2',
+        version: '1.12.6',
         meson_version: '>= 0.56.0',
         license: 'GPL-3.0-or-later',
         default_options : [
@@ -28,7 +28,7 @@ project('mu', ['c', 'cpp'],
 
 # hard-code the date here (for reproduciblity); we derive the dates used in e.g.
 # documentation from this.
-mu_date='2024-03-16'
+mu_date='2024-07-27'
 
 # installation paths
 prefixdir = get_option('prefix')
@@ -163,11 +163,23 @@ else
   message('no wordexp, no command-line option expansion')
 endif
 
-testmaildir=join_paths(meson.current_source_dir(), 'testdata')
-config_h_data.set_quoted('MU_TESTMAILDIR',  join_paths(testmaildir, 'testdir'))
-config_h_data.set_quoted('MU_TESTMAILDIR2',  join_paths(testmaildir, 'testdir2'))
-config_h_data.set_quoted('MU_TESTMAILDIR4',  join_paths(testmaildir, 'testdir4'))
-config_h_data.set_quoted('MU_TESTMAILDIR_CJK',  join_paths(testmaildir, 'cjk'))
+if not get_option('tests').disabled()
+  # only needed for tests
+  cp=find_program('cp')
+  ln=find_program('ln')
+  rm=find_program('rm')
+
+  config_h_data.set_quoted('CP_PROGRAM',   cp.full_path())
+  config_h_data.set_quoted('RM_PROGRAM',   rm.full_path())
+  config_h_data.set_quoted('LN_PROGRAM',   ln.full_path())
+
+  testmaildir=join_paths(meson.current_source_dir(), 'testdata')
+  config_h_data.set_quoted('MU_TESTMAILDIR',  join_paths(testmaildir, 'testdir'))
+  config_h_data.set_quoted('MU_TESTMAILDIR2',  join_paths(testmaildir, 'testdir2'))
+  config_h_data.set_quoted('MU_TESTMAILDIR4',  join_paths(testmaildir, 'testdir4'))
+  config_h_data.set_quoted('MU_TESTMAILDIR_CJK',  join_paths(testmaildir, 'cjk'))
+endif
+
 
 ################################################################################
 # hard dependencies
@@ -179,13 +191,33 @@ gio_unix_dep   = dependency('gio-unix-2.0', version: '>= 2.60')
 gmime_dep      = dependency('gmime-3.0', version: '>= 3.2')
 thread_dep     = dependency('threads')
 
-# we need Xapian 1.4; if we have 1.4.23, we have some newer APIs.
-xapian_dep     = dependency('xapian-core', version:'>= 1.4.23', required:false)
-if xapian_dep.found()
+# we need Xapian 1.4
+xapian_dep = dependency('xapian-core', version:'>= 1.4', required:true)
+xapver = xapian_dep.version()
+if xapver.version_compare('>= 1.4.6')
+  message('xapian ' + xapver + ' supports c++ move-semantics')
+  config_h_data.set('HAVE_XAPIAN_MOVE_SEMANTICS', 1)
+endif
+if xapver.version_compare('>= 1.4.23')
+  message('xapian ' + xapver + ' supports ngrams')
   config_h_data.set('HAVE_XAPIAN_FLAG_NGRAMS', 1)
-else
-  xapian_dep = dependency('xapian-core', version:'>= 1.4')
-  message('Found xapian ' + xapian_dep.version())
+endif
+
+host_system = host_machine.system()
+#
+# soft dependencies
+#
+
+
+# logging
+
+# if we're on a linux machine, perhaps there's systemd/journald.
+# otherwise, we don't bother.
+if host_machine.system() == 'linux'
+  config_h_data.set('MAYBE_USE_JOURNAL', 1)
+endif
+if cc.has_function('g_log_writer_syslog',dependencies: glib_dep)
+  config_h_data.set('MAYBE_USE_SYSLOG', 1)
 endif
 
 # optionally, use Compact Language Detector2 if we can find it.
@@ -196,23 +228,7 @@ else
   message('CLD2 not found or disabled; no support for language detection')
 endif
 
-# note: these are for the unit-tests
-
-cp=find_program('cp')
-mv=find_program('mv')
-ln=find_program('ln')
-rm=find_program('rm')
-awk=find_program(['gawk', 'awk'])
-gzip=find_program('gzip')
-
-config_h_data.set_quoted('CP_PROGRAM',   cp.full_path())
-config_h_data.set_quoted('MV_PROGRAM',   mv.full_path())
-config_h_data.set_quoted('RM_PROGRAM',   rm.full_path())
-config_h_data.set_quoted('LN_PROGRAM',   ln.full_path())
-config_h_data.set_quoted('AWK_PROGRAM',  awk.full_path())
-config_h_data.set_quoted('GZIP_PROGRAM', gzip.full_path())
-
-# soft dependencies
+# guile
 guile_dep = dependency('guile-3.0', required: get_option('guile'))
 # allow for a custom guile-extension-dir
 if guile_dep.found()
@@ -224,14 +240,6 @@ if guile_dep.found()
   endif
   config_h_data.set_quoted('MU_GUILE_EXTENSION_DIR', guile_extension_dir)
   message('Using guile-extension-dir: ' + guile_extension_dir)
-endif
-
-# emacs -- needed for mu4e compilation
-emacs_name=get_option('emacs')
-emacs_min_version='26.3'
-emacs=find_program([emacs_name], version: '>='+emacs_min_version, required:false)
-if not emacs.found()
-  message('emacs not found; not pre-compiling mu4e sources')
 endif
 
 makeinfo=find_program(['makeinfo'], required:false)
@@ -259,7 +267,7 @@ endif
 
 
 ################################################################################
-# write out version.texi (for texiinfo builds in mu4e, guile)
+# write out version.texi (for texinfo builds in mu4e, guile)
 version_texi_data=configuration_data()
 version_texi_data.set('VERSION', meson.project_version())
 version_texi_data.set('EDITION', meson.project_version())
@@ -275,24 +283,23 @@ configure_file(input: join_paths(build_aux, 'version.texi.in'),
 
 ################################################################################
 # install some data files
-install_data('NEWS.org',
-            install_dir : join_paths(datadir,'doc', 'mu'))
+install_data('NEWS.org', install_dir : join_paths(datadir,'doc', 'mu'))
 
 ################################################################################
 # subdirs
 subdir('lib')
 subdir('mu')
 
+
+# emacs -- needed for mu4e compilation
+emacs_name=get_option('emacs')
+emacs_min_version='26.3'
+emacs=find_program([emacs_name], version: '>='+emacs_min_version, required:false)
 if emacs.found()
   subdir('man')
+  subdir('mu4e')
 else
-  message('emacs not found; not generating manpages')
-endif
-
-if emacs.found()
-   subdir('mu4e')
-else
-  message('emacs not found; not preparing mu4e support')
+  message('emacs not found; not pre-compiling mu4e / generating manpages')
 endif
 
 if not get_option('guile').disabled() and guile_dep.found()
@@ -314,3 +321,7 @@ if gmime_dep.version() == '3.2.13'
   warning('gmime version 3.2.13 detected, which as a decoding bug')
   warning('See: https://github.com/jstedfast/gmime/issues/133')
 endif
+
+# Local Variables:
+# indent-tabs-mode: nil
+# End:

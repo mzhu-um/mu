@@ -301,13 +301,19 @@ What all that in place, let's build and install @t{mu} and @t{mu4e}.
 Enter the directory where you unpacked or cloned @t{mu}. Then:
 
 @example
-$ ./configure && make
+$ ./autogen.sh && make
 $ sudo make install
 @end example
 
 Note: if you are familiar with @t{meson}, you can of course use its
 commands directly; the @t{make} commands are just a thin wrapper around
-that.
+that; so, this also works:
+
+@example
+$ meson setup build
+$ meson compile -C build
+$ meson install -C build
+@end example
 
 @subsection Installation
 
@@ -547,7 +553,7 @@ messages, even if other programs have modified the Maildir.
 
 The downside of this thoroughness (which is the default) is that it is
 relatively slow, something that can be noticeable with large e-mail
-corpa on slow file-systems. For a faster approach, you can use the
+corpora on slow file-systems. For a faster approach, you can use the
 following:
 
 @lisp
@@ -774,7 +780,7 @@ the @ref{Composer} to write a new message.
 The next two items in the Main view are @emph{Bookmarks} and @emph{Maildirs}.
 
 Bookmarks are predefined queries with a descriptive name and a shortcut. In the
-example above, we see the default bookmarks. You can pick a bookmar by pressing
+example above, we see the default bookmarks. You can pick a bookmark by pressing
 @key{b} followed by the specific bookmark's shortcut. If you want to edit the
 bookmarked query before invoking it, use @key{B}.
 
@@ -789,11 +795,11 @@ changes indeed. So it is mostly useful for tracking changes while you are
 @emph{not} using @t{mu4e}. For this reason, you can reset the baseline manually,
 e.g. by visiting the main view .
 
-By comparing current results with the baseline, you can quickly what new
+By comparing current results with the baseline, you can quickly see what new
 messages have arrived since the last time you looked.
 
 The baseline@footnote{For debugging, it can be useful to see the time for the
-baseline - for that, there is the @code{mu4e-baseline-time} command} . is reset
+baseline - for that, there is the @code{mu4e-baseline-time} command.} is reset
 automatically when switching to the main view, or invoking @code{buffer-revert}
 (@kbd{g}) while in the main-view. Visiting the ``favorite'' bookmark does the
 same(explained below).
@@ -1087,10 +1093,10 @@ variable @code{mu4e-use-fancy-chars}}, indicating the sort order
 You can change the sort order by clicking the corresponding column with the
 mouse, or with @kbd{M-x mu4e-headers-change-sorting} (@key{O}); note that not
 all fields can be used for sorting. You can toggle threading on/off through
-@kbd{M-x mu4e-headers-toggle-property} or @key{Pt}. For both of these functions,
+@kbd{M-x mu4e-search-toggle-property} or @key{Pt}. For both of these functions,
 unless you provide a prefix argument (@key{C-u}), the current search is updated
 immediately using the new parameters. You can toggle full-search
-(@ref{Searching}) through @kbd{M-x mu4e-headers-toggle-property} as well; or
+(@ref{Searching}) through @kbd{M-x mu4e-search-toggle-property} as well; or
 @key{Pf}.
 
 Note that with threading enabled, the sorting is exclusively by date,
@@ -1105,7 +1111,7 @@ results.
 @section Folding threads
 
 It is possible to fold threads - that is, visually collapse threads into a
-single line (and the reverse), by default using the @key{TAB} amd @key{S-TAB}
+single line (and the reverse), by default using the @key{TAB} and @key{S-TAB}
 bindings. Note that the collapsing is always for threads as a whole, not for
 sub-threads.
 
@@ -1513,32 +1519,35 @@ MIME-parts that contain files@footnote{Attachments come in two flavors:
 operating on them; everything that specifies a filename is considered an
 attachment}.
 
-To save such attachments as files on your file systems, the @t{mu4e}
-message-view offers the command @code{mu4e-view-save-attachments}; default
-keybinding is @key{e} (think @emph{extract}). After invoking the command, you
-can enter the file names to save, comma-separated, and using the completion
-support. Press @key{RET} to save the chosen files to your file-system.
+To save such attachments as files on your file systems, @t{mu4e}'s message-view
+offers the command @code{mu4e-view-save-attachments}; its default keybinding is
+@key{e} (think @emph{extract}).
 
-With a prefix argument, you get to choose the target-directory, otherwise,
-@t{mu4e} determines it following the variable @t{mu4e-attachment-dir} (which can
-be file-system path or a function; see its docstring for details.
+After invoking the command, you can enter the file names to save,
+comma-separated, with completion support. Press @key{RET} to save the chosen
+files to your file-system.
 
-While completing, @code{mu4e-view-completion-minor-mode} is active, which offers
-@code{mu4e-view-complete-all} (bound to @key{C-c C-a} to complete @emph{all}
-files@footnote{Except when using 'Helm'; in that case, use the Helm-mechanism
-for selecting multiple}.
+@t{mu4e} determines the target directory using the variable
+@t{mu4e-attachment-dir} (which can be either file-system path or a function; see
+its docstring for details. However, you can manually set the target by calling
+@code{mu4e-view-save-attachments} with a prefix argument.
+
+When completing the file names, @code{mu4e-view-completion-minor-mode} is
+active, which offers @code{mu4e-view-complete-all} (bound to @key{C-c C-a} to
+complete @emph{all} files@footnote{Except when using 'Helm'; in that case, use
+the Helm-mechanism for selecting multiple}.
 
 @subsection MIME-parts
 
 Not all MIME-parts are message bodies or attachments, and it can be useful to
-operate on those other parts as well. For that, there is the function
+operate on those other parts as well. For that there is
 @code{mu4e-view-mime-part-action} (default key-binding @key{A}). You can pass
-the number of the MIME-pars (as seen in the message view) as a prefix argument,
+the number of the MIME-part (as seen in the message view) as a prefix argument;
 otherwise you get to get to choose from a completion menu.
 
-After choosing one or more MIME-parts, you are asked for an action to apply to
-them; see the variable @code{mu4e-view-mime-part-actions} for the possibilities;
-and you can add your own actions as well, see @ref{MIME-part actions} for some
+After choosing one or more MIME-parts, you can specify an action to apply to
+them; see the variable @code{mu4e-view-mime-part-actions} for the possibilities.
+You can add your own actions as well, see @ref{MIME-part actions} for an
 example.
 
 @node MSGV Custom headers
@@ -1566,9 +1575,12 @@ on the current message. You can specify these actions using the variable
 @code{mu4e-view-actions}; @t{mu4e} defines a number of example actions.
 
 @subsection MIME-part actions
-MIME-part actions allow you to act upon MIME-parts in a message - such
-as attachments.  For now, these actions are defined and documented in
-@code{mu4e-view-mime-part-actions} and see
+MIME-part actions allow you to act upon MIME-parts in a message - such as
+attachments. These actions are defined and documented in
+@code{mu4e-view-mime-part-actions}.
+
+There are a number of built-in actions which may be a good starting point for
+creating your own.
 
 @node MSGV Detaching and reattaching
 @section Detaching and reattaching messages
@@ -1648,8 +1660,8 @@ The major mode for the composer is @code{mu4e-compose-mode}.
 There are a view different ways to @emph{enter} the composer; i.e., from other
 @t{mu4e} views or even completely outside.
 
-If you want the composer to start in a new frame or window, see the variable
-@t{mu4e-compose-switch}.
+If you want the composer to start in a new frame or window, you can configure
+the variable @t{mu4e-compose-switch}; see its docstring for details.
 
 @subsection New message
 
@@ -1671,6 +1683,19 @@ that, you can set (or @t{let}-bind) @t{message-cite-function} to
 
 See @ref{(message) Reply} and @ref{(message) Wide Reply} for further
 information.
+
+Note: in older versions, @t{mu4e-compose-reply} would @emph{ask} whether you
+want to reply-to-all or not; if you are nostalgic for that old behavior, you
+could add something like the following to your configuration:
+@lisp
+(defun compose-reply-wide-or-not-please-ask ()
+  "Ask whether to reply-to-all or not."
+  (interactive)
+  (mu4e-compose-reply (yes-or-no-p "Reply to all?")))
+
+(define-key mu4e-compose-minor-mode-map (kbd "R")
+  #'compose-reply-wide-or-not-please-ask)
+@end lisp
 
 @subsection Forward
 
@@ -1730,10 +1755,14 @@ C-S-u        update mail & re-index
 source for this. Address auto-completion is enabled by default; if you want to
 disable it for some reason, set @t{mu4e-compose-complete-addresses} to @t{nil}.
 
-Emacs also supports cycling through the alternatives. When there are more than
-@emph{5} matching addresses, they are shown in a @t{*Completions*} buffer. Once
-the number of matches gets below this number, one is inserted in the address
-field and you can cycle through the alternatives using @key{TAB}.
+This uses the Emacs machinery for showing and cycling through the candidate
+addresses; it is active when looking at one of the contact fields in the message
+header area.
+
+It is also possible to use @t{mu4e}'s completion elsewhere in @t{emacs}. To
+enable that, a function @t{mu4e-complete-contact} exists, which you can add to
+@t{completion-at-point-functions}, see @ref{(elisp) Completion in Buffers}.
+@t{mu4e} must be running for any completions to be available.
 
 @subsection Limiting the number of addresses
 
@@ -1781,11 +1810,15 @@ value of various properties (and see @ref{Message functions}).
 starts, when the whole buffer has already been set up. This is a good place
 for editing-related settings. @code{mu4e-compose-parent-message} (see above)
 is also at your disposal.
+@item @code{mu4e-compose-post-hook}: this hook is run when we're done with
+message compositions. See the docstring for details.
 @end itemize
 
 @noindent
-Let's look at an examples. As mentioned, @code{mu4e-compose-mode-hook} is especially
-useful for editing-related settings. For example:
+As mentioned, @code{mu4e-compose-mode-hook} is especially useful for
+editing-related settings:
+
+Let's look at an example:
 @lisp
 (add-hook 'mu4e-compose-mode-hook
   (defun my-do-compose-stuff ()
@@ -1794,7 +1827,7 @@ useful for editing-related settings. For example:
     (flyspell-mode)))
 @end lisp
 
-This hook is also useful for adding headers or changing headers, since the
+The hook is also useful for adding headers or changing headers, since the
 message is fully formed when this hook runs. For example, to add a
 @t{Bcc:}-header, you could add something like the following, using
 @code{message-add-header} from @code{message-mode}.
@@ -1911,8 +1944,8 @@ certain folder (maildir).
 Normally, queries return up to @code{mu4e-headers-results-limit} (default: 500)
 results. That is usually more than enough, and makes things significantly
 faster. Sometimes, however, you may want to show @emph{all} results; you can
-enable this with @kbd{M-x mu4e-headers-toggle-property}, or by customizing the
-variable @code{mu4e-headers-full-search}. This applies to all search commands.
+enable this with @kbd{M-x mu4e-search-toggle-property}, or by customizing the
+variable @code{mu4e-search-full}. This applies to all search commands.
 
 You can also influence the sort order and whether threads are shown or not;
 see @ref{Sorting and threading}.
@@ -2089,7 +2122,7 @@ Each of the list elements is a plist with at least:
 :key   - the shortcut key.
 
 Optionally, you add the following:
-:hide  - if t, bookmark is hdden from the main-view and speedbar.
+:hide  - if t, bookmark is hidden from the main-view and speedbar.
 :hide-unread - do not show the counts of unread/total number
  of matches for the query. This can be useful if a bookmark uses
  a very slow query. :hide-unread is implied from :hide.
@@ -2129,7 +2162,7 @@ inbox:
 (add-to-list 'mu4e-bookmarks
   '( :name  "Inbox messages in the last 7 days"
      :query (lambda () (concat "maildir:/inbox AND date:"
-            (format-time-string "%Y%m%d"
+            (format-time-string "%Y%m%d.."
                 (subtract-time (current-time) (days-to-time 7)))))
      :key   ?w) t)
 @end lisp
@@ -2142,7 +2175,7 @@ shown:
   (interactive (list (read-number "Show days old messages: " 7)))
   (let ((start-date (subtract-time (current-time) (days-to-time days-old))))
     (concat "maildir:/inbox AND date:"
-            (format-time-string "%Y%m%d" start-date))))
+            (format-time-string "%Y%m%d.." start-date))))
 
 (add-to-list 'mu4e-bookmarks
   `(:name  "Inbox messages in the last 7 days"
@@ -2784,7 +2817,7 @@ message. An example should clarify this:
       ((mu4e-message-contact-field-matches msg :to
          "mu-discuss@@googlegroups.com")
         "/mu")
-      ;; messages sent directly to some spefic address me go to /private
+      ;; messages sent directly to some specific address me go to /private
       ((mu4e-message-contact-field-matches msg :to "me@@example.com")
         "/private")
       ;; messages with football or soccer in the subject go to /football
@@ -2967,19 +3000,25 @@ have more that one address.
 @node MIME-part actions
 @section MIME-part actions
 
-Finally, let's define a MIME-part action. As mentioned, MIME-part
-functions receive @emph{2} arguments, the message and the attachment
-number to use.
+Finally, let's define a MIME-part action.
 
 The following example action counts the number of lines in an attachment, and
 defines @key{n} as its shortcut key (the @key{n} is prefixed to the
-description). See the the @code{mu4e-view-mime-part-actions} for the details
-of the format.
+description). See the the @code{mu4e-view-mime-part-actions} for the details of
+the format.
 
 @lisp
 (add-to-list 'mu4e-view-mime-part-actions
     ;; count the number of lines in a MIME-part
     '(:name "line-count" :handler "wc -l" :receives pipe))
+@end lisp
+
+Or another one, to import a calendar invitation into the venerable emacs diary:
+@lisp
+(add-to-list 'mu4e-view-mime-part-actions
+    ;; import into calendar;
+    '(:name "dimport-in-diary" :handler (lambda(file) (icalendar-import-file file diary-file))
+      :receives temp))
 @end lisp
 
 @node Example actions
@@ -3258,7 +3297,7 @@ some representation of @code{mu4e-search-threads}, @code{mu4e-search-full}; the
 
 The query parameters are followed by the query-string use for the headers-view.
 By default, if the query string matches some bookmark, the name of that bookmark
-is shown instead of the query it specfies. This can be changed by setting
+is shown instead of the query it specifies. This can be changed by setting
 @code{mu4e-modeline-prefer-bookmark-name} to @t{nil}.
 
 @cindex favorite bookmark
@@ -3589,6 +3628,21 @@ such as @file{~/.emacs.d/init.el}) the following @emph{after} the
   (setq mu4e-view-show-addresses t)
 @end lisp
 
+For recent emacs (29 and later), address-completion may need some extra setup:
+@lisp
+(add-hook 'message-mode-hook
+          (lambda ()
+            (add-to-list 'completion-at-point-functions
+                         #'eudc-capf-complete)))
+@end lisp
+or, if that does not work:
+@lisp
+(add-hook 'message-mode-hook
+          (lambda ()
+            (add-to-list 'completion-at-point-functions
+                         #'message-expand-name)))
+@end lisp
+
 @noindent
 After this, you should be able to:
 @itemize
@@ -3596,6 +3650,7 @@ After this, you should be able to:
 @item Tab-complete addresses from BBDB when composing emails
 @item View the BBDB contact while viewing a message
 @end itemize
+
 
 
 @node Sauron
@@ -4015,6 +4070,11 @@ answers.
 and @t{mu4e} should yield the same results. If they differ, this is
 usually because one of the following reasons:
 @itemize
+@item Database caching:
+changes in @t{mu4e} are not immediately visible in the command-line @t{mu},
+since it can take a while before changes are committed to disk (for performance
+reasons). Note that quitting @t{mu4e} or invoking @t{mu4e-update-mail-and-index}
+and @t{mu4e-update-index} trigger committing to disk as a side-effect.
 @item different options:
 @t{mu4e} defaults to having @t{mu4e-headers-include-related}, and
 @t{mu4e-headers-results-limit} set to 500. However, the command-line
@@ -4080,7 +4140,7 @@ docstring).
 @subsection How can I hide certain messages from the search results?
 See the variables @code{mu4e-headers-hide-predicate} and
 @code{mu4e-headers-hide-enabled}. The latter can be toggled through
-@code{mu4e-headers-toggle-property}.
+@code{mu4e-search-toggle-property}.
 
 For example, to filter out GMail's spam folder, set it to:
 @lisp
@@ -4647,14 +4707,19 @@ final confirmation, which you can of course make as elaborate as you
 wish.
 
 @lisp
-(add-hook 'message-send-hook
-  (lambda ()
-    (unless (yes-or-no-p "Sure you want to send this?")
-      (signal 'quit nil))))
+(defun confirm-empty-subject ()
+  "Require confirmation before sending without subject."
+  (let ((sub (message-field-value "Subject")))
+    (or (and sub (not (string-match "\\`[ \t]*\\'" sub)))
+        (yes-or-no-p "Really send without Subject? ")
+        (keyboard-quit))))
+
+(add-hook 'message-send-hook #'confirm-empty-subject)
 @end lisp
 
-Another option is to simply set @code{message-confirm-send} to
-non-@t{nil} so the question ``Send message?'' is asked for confirmation.
+If you @emph{always} want to be asked for for confirmation, set
+@code{message-confirm-send} to non-@t{nil} so the question ``Send message?'' is
+asked for confirmation.
 
 @node How it works
 @appendix How it works

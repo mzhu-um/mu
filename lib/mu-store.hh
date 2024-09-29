@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2023 Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
+** Copyright (C) 2024 Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
 **
 ** This program is free software; you can redistribute it and/or modify it
 ** under the terms of the GNU General Public License as published by the
@@ -26,13 +26,12 @@
 #include <ctime>
 #include <memory>
 
-#include <xapian.h>
-
 #include "mu-contacts-cache.hh"
 #include "mu-xapian-db.hh"
 #include "mu-config.hh"
 #include "mu-indexer.hh"
 #include "mu-query-results.hh"
+#include "mu-store-worker.hh"
 
 #include <utils/mu-utils.hh>
 #include <utils/mu-utils.hh>
@@ -150,6 +149,13 @@ public:
 	Indexer& indexer();
 
 	/**
+	 * Get the store-worker instance
+	 *
+	 * @return the store-worker
+	 */
+	StoreWorker& store_worker();
+
+	/**
 	 * Run a query; see the `mu-query` man page for the syntax.
 	 *
 	 * Multi-threaded callers must acquire the lock and keep it
@@ -206,8 +212,22 @@ public:
 	 *
 	 * @return the doc id of the added message or an error.
 	 */
-	Result<Id> add_message(Message& msg, bool is_new = false);
-	Result<Id> add_message(const std::string& path, bool is_new = false);
+	Result<Id> add_message(Message &msg, bool is_new = false);
+	Result<Id> add_message(const std::string &path, bool is_new = false);
+
+	/**
+	 * Like add_message(), however, this consumes the message and disposes
+	 * of it when the function ends. This can be useful when injecting
+	 * messages from a worker thread, to ensure no Xapian::Documents
+	 * live in different threads.
+	 *
+	 * @param msg a message
+	 * @param is_new whether this is a completely new message
+	 */
+	Result<Id> consume_message(Message&& msg, bool is_new = false) {
+		Message consumed{std::move(msg)};
+		return add_message(consumed, is_new);
+	}
 
 	/**
 	 * Remove a message from the store. It will _not_ remove the message

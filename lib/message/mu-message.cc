@@ -104,6 +104,10 @@ get_statbuf(const std::string& path, Message::Options opts = Message::Options::N
 	return Ok(std::move(statbuf));
 }
 
+Message::Message() noexcept:
+	priv_{std::make_unique<Private>(Message::Options::None)}
+{}
+
 
 Message::Message(const std::string& path,  Message::Options opts):
 	priv_{std::make_unique<Private>(opts)}
@@ -480,6 +484,28 @@ handle_encrypted(const MimeMultipartEncrypted& part, Message::Private& info)
 		handle_object(part, res->first, info);
 }
 
+static void
+maybe_handle_pkcs7(const MimeObject& obj, Message::Private& info)
+{
+	if (obj.is_mime_application_pkcs7_mime()) {
+		MimeApplicationPkcs7Mime smime(obj);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wswitch-enum"
+		// CompressedData, CertsOnly, Unknown
+		switch (smime.smime_type()) {
+		case Mu::MimeApplicationPkcs7Mime::SecureMimeType::SignedData:
+			info.flags |= Flags::Signed;
+			break;
+		case Mu::MimeApplicationPkcs7Mime::SecureMimeType::EnvelopedData:
+			info.flags |= Flags::Encrypted;
+			break;
+		default:
+			break;
+		}
+#pragma GCC diagnostic pop
+	}
+}
+
 
 static void
 handle_object(const MimeObject& parent,
@@ -504,23 +530,8 @@ handle_object(const MimeObject& parent,
 		/* FIXME: An encrypted part might be signed at the same time.
 		 *        In that case the signed flag is lost. */
 		info.flags |= Flags::Encrypted;
-	} else if (obj.is_mime_application_pkcs7_mime()) {
-		MimeApplicationPkcs7Mime smime(obj);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wswitch-enum"
-		// CompressedData, CertsOnly, Unknown
-		switch (smime.smime_type()) {
-		case Mu::MimeApplicationPkcs7Mime::SecureMimeType::SignedData:
-			info.flags |= Flags::Signed;
-			break;
-		case Mu::MimeApplicationPkcs7Mime::SecureMimeType::EnvelopedData:
-			info.flags |= Flags::Encrypted;
-			break;
-		default:
-			break;
-		}
-#pragma GCC diagnostic pop
-	}
+	} else
+		maybe_handle_pkcs7(obj, info);
 }
 
 /**
@@ -544,6 +555,10 @@ process_message(const MimeMessage& mime_msg, const std::string& path,
 			info.flags |= Flags::Unread;
 	}
 
+	// handle top-level
+	if (const auto mpart = mime_msg.mime_part(); mpart)
+		maybe_handle_pkcs7(*mpart, info);
+
 	// parts
 	mime_msg.for_each([&](auto&& parent, auto&& child_obj) {
 		handle_object(parent, child_obj, info);
@@ -559,9 +574,7 @@ process_message(const MimeMessage& mime_msg, const std::string& path,
 	if (info.body_txt) { /* attempt to get the body-language */
 		if (const auto lang{detect_language(info.body_txt.value())}; lang) {
 			info.language = lang->code;
-			mu_debug("detected language: {}", lang->code);
-		} else
-			mu_debug("could not detect language");
+		}
 	}
 #endif /*HAVE_CLD2*/
 }

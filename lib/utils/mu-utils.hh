@@ -36,7 +36,6 @@
 
 #include "mu-option.hh"
 
-
 #ifndef FMT_HEADER_ONLY
 #define FMT_HEADER_ONLY
 #endif /*FMT_HEADER_ONLY*/
@@ -62,7 +61,7 @@ constexpr const auto SepaChar2 = '\xff';
 /*
  * Debug/error/warning logging
  *
- * The 'noexcept' means that they _wilL_ terminate the program
+ * The 'noexcept' means that they _will_ terminate the program
  * when the formatting fails (ie. a bug)
  */
 
@@ -265,8 +264,28 @@ bool fputs_encoded (const std::string& str, FILE *stream);
 template<typename...T>
 static inline bool mu_print_encoded(fmt::format_string<T...> frm, T&&... args) noexcept {
 	return fputs_encoded(fmt::format(frm, std::forward<T>(args)...),
-			     ::stdout);
+			     stdout);
 }
+
+/**
+ * Convert an int64_t to a time_t, clamping it within the range.
+ *
+ * This is only doing anything when using a 32-bit time_t value. This doesn't
+ * solve the 3038 problem, but at least allows for clearly marking where we
+ * convert
+ *
+ * @param t some 64-bit value that encodes a Unix time.
+ *
+ * @return a time_t value
+ */
+constexpr ::time_t time_t_min = 0;
+constexpr ::time_t time_t_max = std::numeric_limits<::time_t>::max();
+constexpr ::time_t to_time_t(int64_t t) {
+	return std::clamp(t,
+			  static_cast<int64_t>(time_t_min),
+			  static_cast<int64_t>(time_t_max));
+}
+
 
 /**
  * Parse a date string to the corresponding time_t

@@ -1,5 +1,6 @@
 #+TITLE: MU QUERY
 #+MAN_CLASS_OPTIONS: :section-id "@SECTION_ID@" :date "@MAN_DATE@"
+#+include: macros.inc
 
 * NAME
 
@@ -7,16 +8,16 @@ mu-query - a language for finding messages in *mu* databases.
 
 * DESCRIPTION
 
-The mu query language is the language used by *mu find* and *mu4e* to find messages
+The *mu* query language is the language used by *mu find* and *mu4e* to find messages
 in *mu*'s Xapian database. The language is quite similar to Xapian's default
 query-parser, but is an independent implementation that is customized for the
 mu/mu4e use-case.
 
 Here, we give a structured but informal overview of the query language and
-provide examples. As a companion to this, we recommend the *mu fields* and *mu
-flags* commands to get an up-to-date list of the available fields and flags.
+provide examples. As a companion to this, we recommend the *mu info fields*
+command to get an up-to-date list of the available fields and flags.
 
-Furthermore, *mu find* provides the ~--analyze~ option, which shows how *mu*
+Furthermore, *mu find* provides the *--analyze* option, which shows how *mu*
 interprets your query; see the *ANALYZING QUERIES* section below.
 
 *NOTE:* if you use queries on the command-line (say, for *mu find*), you need to
@@ -84,7 +85,7 @@ Note that a =pure not= - e.g. searching for *not apples* is quite a `heavy' quer
 
 * REGULAR EXPRESSIONS AND WILDCARDS
 
-The language supports matching basic PCRE regular expressions, see *pcre(3)*.
+The language supports matching basic PCRE regular expressions, see {{{man-link(pcre,3)}}}.
 
 Regular expressions are enclosed in *//*. Some examples:
 
@@ -116,36 +117,44 @@ Regular expressions can be useful, but are relatively slow.
 
 We already saw a number of search fields, such as *subject:* and *body:*. For the
 full table with all details, including single-char shortcuts, try the command:
-~mu info fields~.
+*mu info fields*.
 
 #+ATTR_MAN: :disable-caption t
-|------------+-----------+--------------------------------|
-| field-name | alias     | description                    |
-| bcc        |           | Blind carbon-copy recipient    |
-| body       |           | Message plain-text body        |
-| cc         |           | Carbon-copy recipient          |
-| changed    |           | Last change time               |
-| date       |           | Message date                   |
-| embed      |           | Embedded text                  |
-| file       |           | Attachment file name           |
-| flags      | flag      | Message properties             |
-| from       |           | Message sender                 |
-| language   | lang      | ISO 639-1 language code (*)    |
-| maildir    |           | Maildir path for message       |
-| list       |           | Mailing list (List-Id:)        |
-| message-id | msgid     | Message-Id                     |
-| mime       | mime-type | Attachment MIME-type           |
-| path       |           | File system path to message    |
-| priority   | prio      | Priority                       |
-| references |           | References to related messages |
-| size       |           | Message size in bytes          |
-| subject    |           | Message subject                |
-| tags       | tag       | Message tags                   |
-| thread     |           | Thread a message belongs to    |
-| to         |           | Message recipient              |
-|------------+-----------+--------------------------------|
+#+begin_example
++-----------+----------+----------+-----------------------------+
+| flag      | shortcut | category | description                 |
++-----------+----------+----------+-----------------------------+
+| draft     | D        | file     | Draft (in progress)         |
++-----------+----------+----------+-----------------------------+
+| flagged   | F        | file     | User-flagged                |
++-----------+----------+----------+-----------------------------+
+| passed    | P        | file     | Forwarded message           |
++-----------+----------+----------+-----------------------------+
+| replied   | R        | file     | Replied-to                  |
++-----------+----------+----------+-----------------------------+
+| seen      | S        | file     | Viewed at least once        |
++-----------+----------+----------+-----------------------------+
+| trashed   | T        | file     | Marked for deletion         |
++-----------+----------+----------+-----------------------------+
+| new       | N        | maildir  | New message                 |
++-----------+----------+----------+-----------------------------+
+| signed    | z        | content  | Cryptographically signed    |
++-----------+----------+----------+-----------------------------+
+| encrypted | x        | content  | Encrypted                   |
++-----------+----------+----------+-----------------------------+
+| attach    | a        | content  | Has at least one attachment |
++-----------+----------+----------+-----------------------------+
+| unread    | u        | pseudo   | New or not seen message     |
++-----------+----------+----------+-----------------------------+
+| list      | l        | content  | Mailing list message        |
++-----------+----------+----------+-----------------------------+
+| personal  | q        | content  | Personal message            |
++-----------+----------+----------+-----------------------------+
+| calendar  | c        | content  | Calendar invitation         |
++-----------+----------+----------+-----------------------------+
+#+end_example
 
-(*) The language code for the text-body if found. This works only if ~mu~ was
+(*) The language code for the text-body if found. This works only if *mu* was
 built with CLD2 support.
 
 There are also the special fields *contact:*, which matches all contact-fields
@@ -217,18 +226,37 @@ size:10m..
 The *flag/g* field allows you to match message flags. The following fields are
 available:
 #+begin_example
-	a,attach        Message with attachment
-	d,draft         Draft Message
-	f,flagged       Flagged
-	l,list          Mailing-list message
-	n,new           New message (in new/ Maildir)
-	p,passed        Passed (`Handled')
-	r,replied       Replied
-	s,seen          Seen
-	t,trashed       Marked for deletion
-	u,unread        new OR NOT seen
-	x,encrypted     Encrypted message
-	z,signed        Signed message
++-----------+----------+----------+-----------------------------+
+| flag      | shortcut | category | description                 |
++-----------+----------+----------+-----------------------------+
+| draft     | D        | file     | Draft (in progress)         |
++-----------+----------+----------+-----------------------------+
+| flagged   | F        | file     | User-flagged                |
++-----------+----------+----------+-----------------------------+
+| passed    | P        | file     | Forwarded message           |
++-----------+----------+----------+-----------------------------+
+| replied   | R        | file     | Replied-to                  |
++-----------+----------+----------+-----------------------------+
+| seen      | S        | file     | Viewed at least once        |
++-----------+----------+----------+-----------------------------+
+| trashed   | T        | file     | Marked for deletion         |
++-----------+----------+----------+-----------------------------+
+| new       | N        | maildir  | New message                 |
++-----------+----------+----------+-----------------------------+
+| signed    | z        | content  | Cryptographically signed    |
++-----------+----------+----------+-----------------------------+
+| encrypted | x        | content  | Encrypted                   |
++-----------+----------+----------+-----------------------------+
+| attach    | a        | content  | Has at least one attachment |
++-----------+----------+----------+-----------------------------+
+| unread    | u        | pseudo   | New or not seen message     |
++-----------+----------+----------+-----------------------------+
+| list      | l        | content  | Mailing list message        |
++-----------+----------+----------+-----------------------------+
+| personal  | q        | content  | Personal message            |
++-----------+----------+----------+-----------------------------+
+| calendar  | c        | content  | Calendar invitation         |
++-----------+----------+----------+-----------------------------+
 #+end_example
 
 Some examples:
@@ -253,7 +281,7 @@ prio:high
 
 The Maildir field describes the directory path starting *after* the Maildir root
 directory, and before the =/cur/= or =/new/= part. So, for example, if there's a
-message with the file name =~/Maildir/lists/running/cur/1234.213:2,=, you could
+message with the file name _~/Maildir/lists/running/cur/1234.213:2,_, you could
 find it (and all the other messages in that same maildir) with:
 #+begin_example
 maildir:/lists/running
@@ -333,17 +361,17 @@ for "cld2-support*.
 * ANALZYING QUERIES
 
 Despite all the excellent documentation, in some cases it can be non-obvious how
-~mu~ interprets your query. For that, you can ask ~mu~ to analyze the query -- that
-is, show how ~mu~ interprets the query.
+*mu* interprets your query. For that, you can ask *mu* to analyze the query -- that
+is, show how *mu* interprets the query.
 
-This uses the the ~--analyze~ option to *mu find*.
+This uses the the *--analyze* option to *mu find*.
 #+begin_example
 $ mu find subject:wombat AND date:3m.. size:..2000  --analyze
-* query:
+,* query:
   subject:wombat AND date:3m.. size:..2000
-* parsed query:
+,* parsed query:
   (and (subject "wombat") (date (range "2023-05-30T06:10:09Z" "")) (size (range "" "2000")))
-* Xapian query:
+,* Xapian query:
   Query((Swombat AND VALUE_GE 4 n64759341 AND VALUE_LE 17 i7d0))
 #+end_example
 
@@ -354,4 +382,6 @@ interprets your query.
 
 * SEE ALSO
 
-*mu-find(1)*, *mu-info(1), *pcre(3)*
+{{{man-link(mu-find,1)}}},
+{{{man-link(mu-info,1)}}},
+{{{man-link(pcre,3)}}}

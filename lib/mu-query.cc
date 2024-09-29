@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2008-2023 Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
+** Copyright (C) 2008-2024 Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
 **
 ** This program is free software; you can redistribute it and/or modify
 ** it under the terms of the GNU General Public License as published by
@@ -18,28 +18,15 @@
 */
 #include <mu-query.hh>
 
-#include <stdexcept>
-#include <string>
-#include <cctype>
-#include <cstring>
-#include <sstream>
-#include <cmath>
-
-#include <stdlib.h>
-#include <xapian.h>
-#include <glib/gstdio.h>
-
-#include "mu-query-results.hh"
+#include "mu-xapian-db.hh"
 #include "mu-query-match-deciders.hh"
 #include "mu-query-threads.hh"
-#include "mu-xapian-db.hh"
-
 #include "mu-query-parser.hh"
 
 using namespace Mu;
 
 struct Query::Private {
-	Private(const Store& store) :
+	explicit Private(const Store& store) :
 		store_{store},
 		parser_flags_{any_of(store_.message_options() & Message::Options::SupportNgrams) ?
 		ParserFlags::SupportNgrams : ParserFlags::None} {}
@@ -126,7 +113,7 @@ Query::Private::make_related_enquire(const StringSet& thread_ids,
 }
 
 struct ThreadKeyMaker : public Xapian::KeyMaker {
-	ThreadKeyMaker(const QueryMatches& matches) : match_info_(matches) {}
+	explicit ThreadKeyMaker(const QueryMatches& matches) : match_info_(matches) {}
 	std::string operator()(const Xapian::Document& doc) const override {
 		const auto it{match_info_.find(doc.get_docid())};
 		return (it == match_info_.end()) ? "" : it->second.thread_path;

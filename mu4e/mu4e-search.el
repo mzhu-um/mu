@@ -392,7 +392,7 @@ status, STATUS."
    ((looking-back "mime:\\([a-zA-Z0-9/-]*\\)" nil)
     (list (match-beginning 1)
           (match-end 1)
-          (mailcap-mime-types)))
+          (when (fboundp 'mailcap-mime-types) (mailcap-mime-types))))
    ((looking-back "\\(from\\|to\\|cc\\|bcc\\|contact\\|recip\\):\\([a-zA-Z0-9/.@]*\\)" nil)
     (list (match-beginning 2)
           (match-end 2)
@@ -628,7 +628,9 @@ query before submitting it."
     ["Next query" mu4e-search-next
      :help "Run next query"]
     ["Narrow search" mu4e-search-narrow
-     :help "Narrow the search query"])
+     :help "Narrow the search query"]
+    ["Search properties" mu4e-search-toggle-property
+     :help "Toggle some search properties"])
   "Easy menu items for search.")
 
 (provide 'mu4e-search)

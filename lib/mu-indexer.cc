@@ -163,7 +163,7 @@ Indexer::Private::handler(const std::string& fullpath, struct stat* statbuf,
 		// in lazy-mode, we ignore this dir if its dirstamp suggest it
 		// is up-to-date (this is _not_ always true; hence we call it
 		// lazy-mode); only for actual message dirs, since the dir
-		// tstamps may not bubble up.U
+		// tstamps may not bubble up.
 		dirstamp_ = store_.dirstamp(fullpath);
 		if (conf_.lazy_check && dirstamp_ >= statbuf->st_ctime &&
 		    htype == Scanner::HandleType::EnterNewCur) {
@@ -241,18 +241,17 @@ Indexer::Private::add_message(const std::string& path)
 	 * The reason for having the lock is some helgrind warnings;
 	 * but it believed those are _false alarms_
 	 * https://gitlab.gnome.org/GNOME/glib/-/issues/2662
-	 *
-	 *	std::unique_lock lock{w_lock_};
 	 */
+	//std::unique_lock lock{w_lock_};
 	auto msg{Message::make_from_path(path, store_.message_options())};
 	if (!msg) {
 		mu_warning("failed to create message from {}: {}", path, msg.error().what());
 		return false;
 	}
 	// if the store was empty, we know that the message is completely new
-	// and can use the fast path (Xapians 'add_document' rather tahn
+	// and can use the fast path (Xapians 'add_document' rather than
 	// 'replace_document)
-	auto res = store_.add_message(msg.value(), was_empty_);
+	auto res = store_.consume_message(std::move(msg.value()), was_empty_);
 	if (!res) {
 		mu_warning("failed to add message @ {}: {}", path, res.error().what());
 		return false;
@@ -325,8 +324,6 @@ Indexer::Private::cleanup()
 void
 Indexer::Private::scan_worker()
 {
-	XapianDb::Transaction tx{store_.xapian_db()}; // RAII
-
 	progress_.reset();
 	if (conf_.scan) {
 		mu_debug("starting scanner");
@@ -366,6 +363,8 @@ Indexer::Private::scan_worker()
 	}
 
 	completed_ = ::time({});
+	// attempt to commit to disk.
+	store_.xapian_db().request_commit(true);
 	store_.config().set<Mu::Config::Id::LastIndex>(completed_);
 	state_.change_to(IndexState::Idle);
 }

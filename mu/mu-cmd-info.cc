@@ -21,7 +21,6 @@
 
 #include "mu-cmd.hh"
 #include <message/mu-message.hh>
-#include <xapian.h>
 #include "utils/mu-utils.hh"
 
 #include <glib.h>
@@ -268,7 +267,7 @@ topic_mu(const Options& opts)
 #else
 			"no"
 #endif
-		, "Better 'm server' REPL for debugging?"});
+		, "Better 'mu server' REPL for debugging"});
 
 	if (!opts.nocolor)
 		colorify(info, opts);

@@ -134,7 +134,7 @@ Then, display the results."
                      ((mu4e-current-buffer-type-p 'view)
                       (when (mu4e--view-detached-p (current-buffer))
                         (mu4e-error
-                         "Cannot navigate in a detached view buffer."))
+                         "Cannot navigate in a detached view buffer"))
                       (mu4e-get-headers-buffer))
                      ;; fallback; but what would trigger this?
                      (t (mu4e-get-headers-buffer))))
@@ -235,9 +235,10 @@ If this succeeds, return the new docid. Otherwise, return nil."
 ;;; Interactive functions
 (defun mu4e-view-action (&optional msg)
   "Ask user for some action to apply on MSG, then do it.
-If MSG is nil apply action to message returned
-bymessage-at-point.  The actions are specified in
-`mu4e-view-actions'."
+If MSG is nil apply action to message returned by
+`mu4e-message-at-point'.
+
+ The actions are specified in `mu4e-view-actions'."
   (interactive)
   (let* ((msg (or msg (mu4e-message-at-point)))
          (actionfunc (mu4e-read-option "Action: " mu4e-view-actions)))
@@ -327,7 +328,7 @@ Add this function to `mu4e-view-mode-hook' to enable this feature."
   "Detach the view buffer from its headers buffer."
   (interactive)
   (unless mu4e-linked-headers-buffer
-    (mu4e-error "This view buffer is already detached."))
+    (mu4e-error "This view buffer is already detached"))
   (mu4e-message "Detached view buffer from %s"
                 (progn mu4e-linked-headers-buffer
                   (with-current-buffer mu4e-linked-headers-buffer
@@ -339,7 +340,7 @@ Add this function to `mu4e-view-mode-hook' to enable this feature."
                   (rename-buffer (make-temp-name (buffer-name)) t))))
 
 (defun mu4e-view-attach (headers-buffer)
-  "Attaches a view buffer to a headers buffer."
+  "Attaches a view buffer to HEADERS-BUFFER."
   (interactive
    (list (get-buffer (read-buffer
                       "Select a headers buffer to attach to: " nil t
@@ -421,7 +422,6 @@ list."
   (interactive)
   (mu4e--view-in-headers-context
    (mu4e-mark-execute-all)))
-
 
 ;;; URL handling
 
@@ -640,8 +640,8 @@ As a side-effect, a message that is being viewed loses its
         ;; problems later (#2260, #2508), so let's remove those
         (article-remove-cr)
         (setq-local mu4e--view-message msg)
-        (mu4e--view-render-buffer msg)
-        (setq-local mu4e--view-mime-part-cached nil))
+        (ignore-errors
+          (mu4e--view-render-buffer msg)))
       (mu4e-loading-mode 0)))
   (unless (mu4e--view-detached-p gnus-article-buffer)
     (with-current-buffer mu4e-linked-headers-buffer
@@ -658,7 +658,12 @@ As a side-effect, a message that is being viewed loses its
       (select-window mu4e~headers-view-win)))
   (with-current-buffer gnus-article-buffer
     (let ((inhibit-read-only t))
-      (run-hooks 'mu4e-view-rendered-hook))))
+      (run-hooks 'mu4e-view-rendered-hook))
+    ;; support bookmarks.
+    (setq-local bookmark-make-record-function
+                #'mu4e--make-bookmark-record)
+    ;; only needed on some setups; #2683
+    (goto-char (point-min))))
 
 (defun mu4e-view-message-text (msg)
   "Return the rendered MSG as a string."
@@ -684,7 +689,7 @@ determine which browser function to use."
     (ignore-errors (run-hooks 'gnus-article-decode-hook))
     (let ((header (unless skip-headers
                     (cl-loop for field in '("from" "to" "cc" "date" "subject")
-                             when (message-fetch-field field)
+                             when (message-field-value field)
                              concat (format "%s: %s\n" (capitalize field) it))))
           (parts (mm-dissect-buffer t t)))
       ;; If singlepart, enforce a list.
@@ -730,13 +735,15 @@ determine which browser function to use."
           (ignore-errors (run-hooks 'gnus-article-decode-hook))
           (gnus-article-prepare-display)
           (mu4e--view-activate-urls)
+          ;; `gnus-summary-bookmark-make-record' does not work properly when "appeased."
+          (kill-local-variable 'bookmark-make-record-function)
           (setq mu4e~gnus-article-mime-handles gnus-article-mime-handles
                 gnus-article-decoded-p gnus-article-decode-hook)
           (set-buffer-modified-p nil)
           (add-hook 'kill-buffer-hook #'mu4e--view-kill-mime-handles))
       (epg-error
-       (mu4e-warn "EPG error: %s; fall back to raw view"
-                  (error-message-string err))))))
+       (mu4e-message "EPG error: %s; fall back to raw view"
+                     (error-message-string err))))))
 
 (defun mu4e-view-refresh ()
   "Refresh the message view."
@@ -1070,10 +1077,6 @@ Based on Gnus' article-mode."
   (mu4e-search-minor-mode)
   (mu4e-compose-minor-mode)
   (setq buffer-undo-list t) ;; don't record undo info
-
-  ;; support bookmarks.
-  (set (make-local-variable 'bookmark-make-record-function)
-       'mu4e--make-bookmark-record)
 
   ;; autopair mode gives error when pressing RET
   ;; turn it off

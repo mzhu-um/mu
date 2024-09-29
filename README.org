@@ -62,7 +62,7 @@ as a Linux distribution. Many have packages available.
 To be able to build ~mu~, ensure you have:
 
 - a C++17 compiler (~gcc~ or ~clang~ are known to work)
-- development packages for /Xapian/ and /GMime/ and /GLib/ (see ~meson.build~ for thex
+- development packages for /Xapian/ and /GMime/ and /GLib/ (see ~meson.build~ for the
   versions)
 - basic tools such as ~make~, ~sed~, ~grep~
 - ~meson~
@@ -76,7 +76,7 @@ Help is welcome!
 ** Building
 
 #+begin_example
-$ git clone git://github.com/djcb/mu.git
+$ git clone https://github.com/djcb/mu.git
 $ cd mu
 #+end_example
 
@@ -94,7 +94,7 @@ $ sudo make install
 Alternatively, you can run ~meson~ directly (see the ~meson~ documentation for
 more details):
 #+begin_example
-$ meson setup -C build
+$ meson setup build
 $ meson compile -C build
 $ meson install -C build
 #+end_example

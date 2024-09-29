@@ -1,5 +1,5 @@
 /*
-** Copyright (C) 2021-2023 Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
+** Copyright (C) 2021-2024 Dirk-Jan C. Binnema <djcb@djcbsoftware.nl>
 **
 ** This program is free software; you can redistribute it and/or modify it
 ** under the terms of the GNU General Public License as published by the
@@ -75,8 +75,11 @@ struct Store::Private {
 		config_{make_config(xapian_db_, root_maildir, conf)},
 		contacts_cache_{config_},
 		root_maildir_{remove_slash(config_.get<Config::Id::RootMaildir>())},
-		message_opts_{make_message_options(config_)}
-		{}
+		message_opts_{make_message_options(config_)} {
+		// so tell xapian-db to update its internal cacheed values from
+		// config. In practice: batch-size.
+		xapian_db_.reinit();
+	}
 
 	~Private() try {
 		mu_debug("closing store @ {}", xapian_db_.path());
@@ -128,6 +131,7 @@ struct Store::Private {
 	XapianDb xapian_db_;
 	Config config_;
 	ContactsCache            contacts_cache_;
+	std::unique_ptr<StoreWorker> store_worker_;
 	std::unique_ptr<Indexer> indexer_;
 
 	const std::string	root_maildir_;
@@ -249,6 +253,7 @@ Store::Store(Store&& other)
 {
 	priv_ = std::move(other.priv_);
 	priv_->indexer_.reset();
+	priv_->store_worker_.reset();
 }
 
 Store::~Store() = default;
@@ -311,6 +316,15 @@ Store::indexer()
 		priv_->indexer_ = std::make_unique<Indexer>(*this);
 
 	return *priv_->indexer_.get();
+}
+
+StoreWorker&
+Store::store_worker()
+{
+	if (!priv_->store_worker_)
+		priv_->store_worker_ = std::make_unique<StoreWorker>(*this);
+
+	return *priv_->store_worker_;
 }
 
 Result<Store::Id>
@@ -379,10 +393,12 @@ Store::remove_messages(const std::vector<Store::Id>& ids)
 {
 	std::lock_guard guard{priv_->lock_};
 
-	XapianDb::Transaction tx (xapian_db()); // RAII
+	xapian_db().request_transaction();
 
 	for (auto&& id : ids)
 		xapian_db().delete_document(id);
+
+	xapian_db().request_commit(true/*force*/);
 }
 
 

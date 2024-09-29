@@ -41,6 +41,7 @@ XapianDb::wdb()
 {
 	if (read_only())
 		throw std::runtime_error("database is read-only");
+
 	return std::get<Xapian::WritableDatabase>(db_);
 }
 
@@ -48,12 +49,6 @@ bool
 XapianDb::read_only() const
 {
 	return !std::holds_alternative<Xapian::WritableDatabase>(db_);
-}
-
-const std::string&
-XapianDb::path() const
-{
-	return path_;
 }
 
 void
@@ -101,12 +96,17 @@ make_db(const std::string& db_path, Flavor flavor)
 XapianDb::XapianDb(const std::string& db_path, Flavor flavor):
 	path_(make_path(db_path, flavor)),
 	db_(make_db(path_, flavor)),
-	batch_size_{Config(*this).get<Config::Id::BatchSize>()}
-{
+	batch_size_{Config(*this).get<Config::Id::BatchSize>()/*default*/} {
 	if (flavor == Flavor::CreateOverwrite)
 		set_timestamp(MetadataIface::created_key);
 
-	mu_debug("created {} / {} (batch-size: {})", flavor, *this, batch_size_);
+	mu_debug("created {}", *this);
+}
+
+void
+XapianDb::reinit() {
+	batch_size_ = Config(*this).get<Config::Id::BatchSize>();
+	mu_debug("set batch-size to {}", batch_size_);
 }
 
 

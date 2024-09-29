@@ -24,14 +24,22 @@
 #include <memory>
 #include <string>
 #include <mutex>
+#include <thread>
 #include <functional>
 #include <unordered_map>
 
 #include <glib.h>
 
-#include <xapian.h>
 #include <utils/mu-result.hh>
 #include <utils/mu-utils.hh>
+
+/* starting with 1.4.6, Xapian supports C++ move semantics,
+ * but only with XAPIAN_MOVE_SEMANTICS defined
+ */
+#ifndef XAPIAN_MOVE_SEMANTICS
+#define XAPIAN_MOVE_SEMANTICS
+#endif /*XAPIAN_MOVE_SEMANTICS*/
+#include <xapian.h>
 
 namespace Mu {
 
@@ -42,6 +50,8 @@ template <typename Func> void
 xapian_try(Func&& func) noexcept
 try {
 	func();
+} catch (const Mu::Error& me) {
+	mu_critical("{}: mu error '{}'", __func__, me.what());
 } catch (const Xapian::Error& xerr) {
 	mu_critical("{}: xapian error '{}'", __func__, xerr.get_msg());
 } catch (const std::runtime_error& re) {
@@ -56,6 +66,9 @@ template <typename Func, typename Default = std::invoke_result<Func>> auto
 xapian_try(Func&& func, Default&& def) noexcept -> std::decay_t<decltype(func())>
 try {
 	return func();
+} catch (const Mu::Error& me) {
+	mu_critical("{}: mu error '{}'", __func__, me.what());
+	return static_cast<Default>(def);
 } catch (const Xapian::DocNotFoundError& xerr) {
 	return static_cast<Default>(def);
 } catch (const Xapian::Error& xerr) {
@@ -76,15 +89,18 @@ template <typename Func> auto
 xapian_try_result(Func&& func) noexcept -> std::decay_t<decltype(func())>
 try {
 	return func();
+
+} catch (const Mu::Error& me) {
+	return Err(std::move(me));
 } catch (const Xapian::DatabaseNotFoundError& nferr) {
 	return Err(Error{Error::Code::Xapian, "failed to open database"}.
-		   add_hint("Perhaps try (re)creating using `mu index'"));
+		   add_hint("Try (re)creating using `mu init'"));
 } catch (const Xapian::DatabaseLockError& dlerr) {
 	return Err(Error{Error::Code::StoreLock, "database locked"}.
 		   add_hint("Perhaps mu is already running?"));
 } catch (const Xapian::DatabaseCorruptError& dcerr) {
 	return Err(Error{Error::Code::Xapian, "failed to read database"}.
-		   add_hint("Try (re)creating using `mu index'"));
+		   add_hint("Try (re)creating using `mu init'"));
 } catch (const Xapian::DocNotFoundError& dnferr) {
 	return Err(Error{Error::Code::Xapian, "message not found in database"}.
 		   add_hint("Try reopening the database"));
@@ -120,13 +136,13 @@ struct MetadataIface {
 
 
 /// In-memory db
-struct MemDb: public MetadataIface {
+struct MemDb final: public MetadataIface {
 	/**
 	 * Create a new memdb
 	 *
 	 * @param readonly read-only? (for testing)
 	 */
-	MemDb(bool readonly=false):read_only_{readonly} {}
+	explicit MemDb(bool readonly=false):read_only_{readonly} {}
 
 	/**
 	 * Set some metadata
@@ -179,10 +195,8 @@ private:
 
 /**
  * Fairly thin wrapper around Xapian::Database and Xapian::WritableDatabase
- * with just the things we need + locking + exception handling
  */
-class XapianDb: public MetadataIface {
-#define DB_LOCKED std::unique_lock lock__{lock_};
+class XapianDb final: public MetadataIface {
 public:
 	/**
 	 * Type of database to create.
@@ -195,7 +209,7 @@ public:
 	};
 
 	/**
-	 * XapianDb CTOR. This may throw some Xapian exception.
+	 * XapianDb CTOR. This may throw.
 	 *
 	 * @param db_path path to the database
 	 * @param flavor kind of database
@@ -205,15 +219,20 @@ public:
 	/**
 	 * DTOR
 	 */
-	~XapianDb() {
-		if (tx_level_ > 0)
-			mu_warning("inconsistent transaction level ({})", tx_level_);
-		if (tx_level_ > 0) {
-			mu_debug("closing db after committing {} change(s)", changes_);
-			xapian_try([this]{ DB_LOCKED; wdb().commit_transaction(); });
-		} else
-			mu_debug("closing db");
+	~XapianDb() override {
+		// shouldn't use read_only() here, since that's virtual.
+		if (std::holds_alternative<Xapian::WritableDatabase>(db_))
+			request_commit(true/*force*/);
+		mu_debug("closing db");
 	}
+
+	/**
+	 * Reinitialize from inner-config. Needed after CreateOverwrite.
+	 *
+	 * This is bit of a hack, needed since we cannot setup the config
+	 * before we have a database.
+	 */
+	void reinit();
 
 	/**
 	 * Is the database read-only?
@@ -227,7 +246,9 @@ public:
 	 *
 	 * @return path to database
 	 */
-	const std::string& path() const;
+	const std::string& path() const {
+		return path_;
+	}
 
 	/**
 	 * Get a description of the Xapian database
@@ -245,7 +266,7 @@ public:
 	 */
 	size_t size() const noexcept {
 		return xapian_try([this]{
-			DB_LOCKED; return db().get_doccount(); }, 0);
+			return db().get_doccount(); }, 0);
 	}
 
 	/**
@@ -261,7 +282,7 @@ public:
 	 * @return an enquire object
 	 */
 	Xapian::Enquire enquire() const {
-		DB_LOCKED; return Xapian::Enquire(db());
+		return Xapian::Enquire(db());
 	}
 
 	/**
@@ -273,7 +294,7 @@ public:
 	 */
 	Result<Xapian::Document> document(Xapian::docid id) const {
 		return xapian_try_result([&]{
-			DB_LOCKED; return Ok(db().get_document(id)); });
+			return Ok(db().get_document(id)); });
 	}
 
 	/**
@@ -285,7 +306,7 @@ public:
 	 */
 	std::string metadata(const std::string& key) const override {
 		return xapian_try([&]{
-			DB_LOCKED; return db().get_metadata(key);}, "");
+			return db().get_metadata(key);}, "");
 	}
 
 	/**
@@ -295,8 +316,8 @@ public:
 	 * @param val new value for key
 	 */
 	void set_metadata(const std::string& key, const std::string& val) override {
-		xapian_try([&] { DB_LOCKED; wdb().set_metadata(key, val);
-				maybe_commit(); });
+		xapian_try([&] { wdb().set_metadata(key, val);
+				maybe_commit();});
 	}
 
 	/**
@@ -308,7 +329,6 @@ public:
 	//using each_func = MetadataIface::each_func;
 	void for_each(MetadataIface::each_func&& func) const override {
 		xapian_try([&]{
-			DB_LOCKED;
 			for (auto&& it = db().metadata_keys_begin();
 			     it != db().metadata_keys_end(); ++it)
 				func(*it, db().get_metadata(*it));
@@ -324,7 +344,7 @@ public:
 	 */
 	bool term_exists(const std::string& term) const {
 		return xapian_try([&]{
-			DB_LOCKED; return db().term_exists(term);}, false);
+			return db().term_exists(term);}, false);
 	}
 
 	/**
@@ -336,7 +356,6 @@ public:
 	 */
 	Result<Xapian::docid> add_document(const Xapian::Document& doc) {
 		return xapian_try_result([&]{
-			DB_LOCKED;
 			auto&& id{wdb().add_document(doc)};
 			set_timestamp(MetadataIface::last_change_key);
 			maybe_commit();
@@ -354,9 +373,9 @@ public:
 	 * @return new docid or an error
 	 */
 	Result<Xapian::docid>
-	replace_document(const std::string& term, const Xapian::Document& doc) {
+	replace_document(const std::string& term,
+			 const Xapian::Document& doc) {
 		return xapian_try_result([&]{
-			DB_LOCKED;
 			auto&& id{wdb().replace_document(term, doc)};
 			set_timestamp(MetadataIface::last_change_key);
 			maybe_commit();
@@ -364,9 +383,9 @@ public:
 		});
 	}
 	Result<Xapian::docid>
-	replace_document(Xapian::docid id, const Xapian::Document& doc) {
+	replace_document(Xapian::docid id,
+			 const Xapian::Document& doc) {
 		return xapian_try_result([&]{
-			DB_LOCKED;
 			wdb().replace_document(id, doc);
 			set_timestamp(MetadataIface::last_change_key);
 			maybe_commit();
@@ -383,7 +402,6 @@ public:
 	 */
 	Result<void> delete_document(const std::string& term) {
 		return xapian_try_result([&]{
-			DB_LOCKED;
 			wdb().delete_document(term);
 			set_timestamp(MetadataIface::last_change_key);
 			maybe_commit();
@@ -392,7 +410,6 @@ public:
 	}
 	Result<void> delete_document(Xapian::docid id) {
 		return xapian_try_result([&]{
-			DB_LOCKED;
 			wdb().delete_document(id);
 			set_timestamp(MetadataIface::last_change_key);
 			maybe_commit();
@@ -402,7 +419,6 @@ public:
 
 	template<typename Func>
 	size_t all_terms(const std::string& prefix, Func&& func) const {
-		DB_LOCKED;
 		size_t n{};
 		for (auto it = db().allterms_begin(prefix); it != db().allterms_end(prefix); ++it) {
 			if (!func(*it))
@@ -412,110 +428,70 @@ public:
 		return n;
 	}
 
-	/*
-	 * If the "transaction ref count" > 0 (with inc_transactions());, we run
-	 * in "transaction mode". That means that the subsequent Xapian mutation
-	 * are part of a transactions, which is flushed when the number of
-	 * changes reaches the batch size, _or_ the transaction ref count is
-	 * decreased to 0 (dec_transactions()). *
-	 */
-
 	/**
-	 * Increase the transaction level; needs to be balance by dec_transactions()
-	 */
-	void inc_transaction_level() {
-		xapian_try([this]{
-			DB_LOCKED;
-			if (tx_level_ == 0) {// need to start the Xapian transaction?
-				mu_debug("begin transaction");
-				wdb().begin_transaction();
-			}
-			++tx_level_;
-			mu_debug("ind'd tx level to {}", tx_level_);
-		});
-	}
-
-	/**
-	 * Decrease the transaction level (to balance inc_transactions())
+	 * Requests a transaction to be started; this is only
+	 * a request, which may not be granted.
 	 *
-	 * If the level reach 0, perform a Xapian commit.
+	 * If you're already in a transaction but that transaction
+	 * was started in another thread, that transaction will be
+	 * committed before starting a new one.
+	 *
+	 * Otherwise, start a transaction if you're not already in one.
+	 *
+	 * @return A result; either true if a transaction was started; false
+	 * otherwise, or an error.
 	 */
-	void dec_transaction_level() {
-		xapian_try([this]{
-			DB_LOCKED;
-			if (tx_level_ == 0) {
-				mu_critical("cannot dec transaction-level)");
-				throw std::runtime_error("cannot dec transactions");
-			}
+	Result<bool> request_transaction() {
+		return xapian_try_result([this]() {
+			auto& db = wdb();
+			if (in_transaction())
+				return Ok(false); // nothing to
 
-			--tx_level_;
-			if (tx_level_ == 0) {// need to commit the Xapian transaction?
-				mu_debug("committing {} changes", changes_);
-				changes_ = 0;
-				wdb().commit_transaction();
-			}
-
-			mu_debug("dec'd tx level to {}", tx_level_);
+			db.begin_transaction();
+			mu_debug("begin transaction");
+			in_transaction_ = true;
+			return Ok(true);
 		});
 	}
+
+
+	/**
+	 * Explicitly request the Xapian DB to be committed to disk
+	 *
+	 * @param force whether to force-commit
+	 */
+	void request_commit(bool force = false) { request_commit(wdb(), force); }
+	void maybe_commit() { request_commit(false); }
 
 	/**
 	 * Are we inside a transaction?
 	 *
 	 * @return true or false
 	 */
-	bool in_transaction() const { DB_LOCKED; return tx_level_ > 0; }
-
-
-	/**
-	 * RAII Transaction object
-	 *
-	 */
-	struct Transaction {
-		Transaction(XapianDb& db): db_{db} {
-			db_.inc_transaction_level();
-		}
-		~Transaction() {
-			db_.dec_transaction_level();
-		}
-	private:
-		XapianDb& db_;
-	};
-
-
-	/**
-	 * Manually request the Xapian DB to be committed to disk. This won't
-	 * do anything while in a transaction.
-	 */
-	void commit() {
-		xapian_try([this]{
-			DB_LOCKED;
-			if (tx_level_ == 0) {
-				mu_info("committing xapian-db @ {}", path_);
-				wdb().commit();
-			} else
-				mu_debug("not committing while in transaction");
-		});
-	}
+	bool in_transaction() const { return in_transaction_; }
 
 	using DbType = std::variant<Xapian::Database, Xapian::WritableDatabase>;
-private:
 
+private:
 	/**
-	 * To be called after all changes, with DB_LOCKED held.
+	 * To be called with DB_LOCKED held.
 	 */
-	void maybe_commit() {
-		// in transaction-mode and enough changes, commit them
-		// and start a new transaction
-		if (tx_level_ > 0 && ++changes_ >= batch_size_) {
-			mu_debug("batch full ({}/{}); committing change", changes_, batch_size_);
-			wdb().commit_transaction();
-			wdb().commit();
-			--tx_level_;
+	void request_commit(Xapian::WritableDatabase& db, bool force) {
+		if ((++changes_ < batch_size_) && !force)
+			return;
+		xapian_try([&]{
+			mu_debug("committing {} changes; transaction={}; "
+				 "forced={}", changes_,
+				 in_transaction() ? "yes" : "no",
+				 force ? "yes" : "no");
+			if (in_transaction()) {
+				db.commit_transaction();
+				in_transaction_ = {};
+			}
+			db.commit();
 			changes_ = 0;
-			wdb().begin_transaction();
-			++tx_level_;
-		}
+
+		});
 	}
 
 	void set_timestamp(const std::string_view key);
@@ -534,12 +510,11 @@ private:
 	 */
 	Xapian::WritableDatabase& wdb();
 
-	mutable std::mutex lock_;
 	std::string path_;
-	DbType	db_;
-	size_t	tx_level_{};
-	const size_t batch_size_;
+	DbType db_;
 	size_t changes_{};
+	bool in_transaction_{};
+	size_t batch_size_;
 };
 
 constexpr std::string_view
