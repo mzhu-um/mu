@@ -410,8 +410,10 @@ Server::Private::make_command_map()
 	    CommandInfo{
 		ArgMap{{":docid",
 			ArgInfo{Type::Number, false, "document-id for the message to remove"}},
-			{":path",
-			ArgInfo{Type::String, false, "document-id for the message to remove"}}
+		       {":msgid",
+			ArgInfo{Type::String, false, "message-id for the message to remove"}},
+		       {":path",
+			ArgInfo{Type::String, false, "path to the message to remove"}}
 		},
 		"remove a message from filesystem and database, using either :docid or :path",
 		[&](const auto& params) { remove_handler(params); }});
@@ -995,10 +997,9 @@ Server::Private::remove_handler(const Command& cmd)
 	// support message id
 	const auto docids{determine_docids(store(), cmd)};
 
-	auto docid_opt{cmd.number_arg(":docid")};
 	auto path_opt{cmd.string_arg(":path")};
 
-	if (!!docid_opt == !!path_opt)
+	if (!! docids.size() == !!path_opt)
 		throw Error(Error::Code::InvalidArgument,
 			    "must pass precisely one of :docid and :path");
 
